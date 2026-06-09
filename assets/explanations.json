@@ -1,0 +1,26 @@
+{
+    "spec.policies": {
+        "reason": "The active service policies do not match the corporate baseline.",
+        "next_step": "Ensure the 'Corporate Block List' and 'Geo Fencing' policies are applied in the correct order."
+    },
+    "spec.app_firewall.name": {
+        "reason": "The application firewall policy does not match the corporate baseline.",
+        "next_step": "Apply the 'Shared/AppFW-Blocking' policy as per corporate baseline."
+    },
+    "spec.app_firewall": {
+        "reason": "Application firewall is not configured.",
+        "next_step": "Apply the 'Shared/AppFW-Blocking' policy as per corporate baseline."
+    },
+    "spec.__ONE_OF__tls_hsts": {
+        "reason": "TLS configuration is invalid.",
+        "next_step": "Enable 'HTTPS Auto-Cert' or configure manual 'HTTPS' ports. HSTS must be enabled."
+    },
+    "spec.disable_api_discovery": {
+        "reason": "API Discovery is enabled. API Discovery is not included in this baseline.",
+        "next_step": "If API Security is required, refer to the API Security baseline configuration."
+    },
+    "spec.advertise_on_public_default_vip": {
+        "reason": "The load balancer is not advertising on the public default VIP as per baseline.",
+        "next_step": "Enable 'Advertise on Public Default VIP' to comply with baseline."
+    }
+}

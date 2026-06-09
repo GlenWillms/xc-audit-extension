@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>F5 XC Namespace Audit — Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <h1>F5 XC Namespace Audit</h1>
+    <p class="hint">This extension uses your browser session to authenticate with the F5 XC API — just log in to the console and it works automatically.</p>
+
+    <!-- Baseline -->
+    <section class="card">
+      <h2>Baseline Configuration</h2>
+      <p class="hint">The JSON baseline that load balancers are audited against.</p>
+      <textarea id="baselineEditor" rows="16" spellcheck="false"></textarea>
+      <div id="baselineError" class="error"></div>
+      <div class="button-row">
+        <button id="saveBaseline" class="btn-primary">Save</button>
+        <button id="resetBaseline" class="btn-secondary">Reset to Default</button>
+        <label class="btn-secondary file-upload">
+          Upload JSON
+          <input type="file" id="uploadBaseline" accept=".json" hidden>
+        </label>
+      </div>
+      <div id="baselineStatus" class="status"></div>
+    </section>
+
+    <!-- Explanations -->
+    <section class="card">
+      <h2>Explanations</h2>
+      <p class="hint">Maps config paths to human-readable reasons and remediation steps.</p>
+      <textarea id="explanationsEditor" rows="12" spellcheck="false"></textarea>
+      <div id="explanationsError" class="error"></div>
+      <div class="button-row">
+        <button id="saveExplanations" class="btn-primary">Save</button>
+        <button id="resetExplanations" class="btn-secondary">Reset to Default</button>
+        <label class="btn-secondary file-upload">
+          Upload JSON
+          <input type="file" id="uploadExplanations" accept=".json" hidden>
+        </label>
+      </div>
+      <div id="explanationsStatus" class="status"></div>
+    </section>
+
+    <!-- Settings -->
+    <section class="card">
+      <h2>Settings</h2>
+      <label class="toggle-row">
+        <input type="checkbox" id="autoAudit" checked>
+        <span>Auto-audit on page load</span>
+      </label>
+      <label class="setting-row">
+        <span>Cache TTL (seconds)</span>
+        <input type="number" id="cacheTtl" value="300" min="0" max="3600" style="width:80px">
+      </label>
+      <div class="button-row">
+        <button id="saveSettings" class="btn-primary">Save Settings</button>
+      </div>
+      <div id="settingsStatus" class="status"></div>
+    </section>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

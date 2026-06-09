@@ -1,0 +1,45 @@
+{
+  "namespace_baseline": {
+      "service_policies": [
+        {
+          "name": "blocked-filetypes",
+          "namespace": "g-willms"
+        },
+        {
+          "name": "ves-io-allow-all",
+          "namespace": "shared"
+        }
+      ]
+  },
+  "lb_baseline": {
+    "spec": {
+      "__ONE_OF__tls_hsts": [
+            {
+              "https_auto_cert": { "add_hsts": true }
+            },
+            {
+              "https": { "add_hsts": true }
+            }
+          ],
+      "app_firewall": {
+        "name": "appfw-blocking"
+      },
+      "ddos_mitigation_rules": [],
+      "l7_ddos_protection": {
+        "mitigation_block": {},
+        "default_rps_threshold": {},
+        "clientside_action_none": {},
+        "ddos_policy_none": {}
+      },
+      "service_policies_from_namespace": {},
+      "disable_trust_client_ip_headers": {},
+      "disable_api_discovery": {},
+      "disable_bot_defense": {},
+      "default_sensitive_data_policy": {},
+      "disable_api_testing": {},
+      "disable_api_definition": {},
+      "disable_ip_reputation": {},
+      "disable_client_side_defense": {}
+    }
+  }
+}
