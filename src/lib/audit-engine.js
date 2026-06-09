@@ -109,7 +109,36 @@ export function enrichDiffs(diffs, explanations) {
   });
 }
 
-export function runFullAudit(lbConfigs, policyConfig, baseline, explanations) {
+export function applyExemptions(baselineSpec, lbLabels, exemptionMap) {
+  const skipped = [];
+  if (!exemptionMap || !lbLabels) return { spec: baselineSpec, skipped };
+
+  const activeCodes = [];
+  for (const code of Object.keys(exemptionMap)) {
+    const labelKey = `xc-audit-${code}`;
+    if (lbLabels[labelKey] === 'true' || lbLabels[labelKey] === true) {
+      activeCodes.push(code);
+    }
+  }
+
+  if (activeCodes.length === 0) return { spec: baselineSpec, skipped };
+
+  const filtered = { ...baselineSpec };
+  for (const code of activeCodes) {
+    const entry = exemptionMap[code];
+    if (!entry) continue;
+    const keys = Array.isArray(entry) ? entry : entry.keys || [];
+    for (const key of keys) {
+      if (key in filtered) {
+        delete filtered[key];
+        skipped.push({ code, key, label: entry.label || code });
+      }
+    }
+  }
+  return { spec: filtered, skipped };
+}
+
+export function runFullAudit(lbConfigs, policyConfig, baseline, explanations, exemptionMap) {
   const results = { policies: null, loadBalancers: [] };
 
   if (baseline.namespace_baseline && policyConfig) {
@@ -124,12 +153,20 @@ export function runFullAudit(lbConfigs, policyConfig, baseline, explanations) {
   if (baseline.lb_baseline) {
     const lbBaseSpec = baseline.lb_baseline.spec || baseline.lb_baseline;
     for (const lb of lbConfigs) {
+      const labels = lb.metadata?.labels || lb.labels || {};
+      const { spec: filteredSpec, skipped } = applyExemptions(lbBaseSpec, labels, exemptionMap);
       const currentSpec = lb.spec || {};
-      const diffs = findDiffs(currentSpec, lbBaseSpec, 'spec');
+      const diffs = findDiffs(currentSpec, filteredSpec, 'spec');
+      const failedKeys = new Set(diffs.map((d) => d.path.split('.')[1]));
+      const passed = Object.keys(filteredSpec)
+        .filter((k) => !failedKeys.has(k))
+        .map((k) => ({ key: k, path: `spec.${k}` }));
       results.loadBalancers.push({
         name: lb.metadata?.name || lb.name,
         pass: diffs.length === 0,
         diffs: enrichDiffs(diffs, explanations),
+        skipped,
+        passed,
       });
     }
   }

@@ -1,0 +1,57 @@
+{
+  "ignore-apid": {
+    "label": "API Discovery",
+    "keys": ["disable_api_discovery"],
+    "category": "API Security"
+  },
+  "ignore-apip": {
+    "label": "API Protection",
+    "keys": ["disable_api_definition", "disable_api_testing"],
+    "category": "API Security"
+  },
+  "ignore-bot": {
+    "label": "Bot Defense",
+    "keys": ["disable_bot_defense"],
+    "category": "Bot & Client Protection"
+  },
+  "ignore-csd": {
+    "label": "Client-Side Defense",
+    "keys": ["disable_client_side_defense"],
+    "category": "Bot & Client Protection"
+  },
+  "ignore-iprep": {
+    "label": "IP Reputation",
+    "keys": ["disable_ip_reputation"],
+    "category": "Bot & Client Protection"
+  },
+  "ignore-sdp": {
+    "label": "Sensitive Data Policy",
+    "keys": ["default_sensitive_data_policy"],
+    "category": "Policy & Data"
+  },
+  "ignore-waf": {
+    "label": "Web App Firewall",
+    "keys": ["app_firewall"],
+    "category": "Web Application Firewall"
+  },
+  "ignore-ddos": {
+    "label": "DDoS Protection",
+    "keys": ["ddos_mitigation_rules", "l7_ddos_protection"],
+    "category": "DDoS Protection"
+  },
+  "ignore-tls": {
+    "label": "TLS / HSTS",
+    "keys": ["__ONE_OF__tls_hsts"],
+    "category": "TLS & Encryption"
+  },
+  "ignore-sp": {
+    "label": "Service Policies",
+    "keys": ["service_policies_from_namespace"],
+    "category": "Policy & Data"
+  },
+  "ignore-trustip": {
+    "label": "Trust Client IP Headers",
+    "keys": ["disable_trust_client_ip_headers"],
+    "category": "Policy & Data"
+  }
+}

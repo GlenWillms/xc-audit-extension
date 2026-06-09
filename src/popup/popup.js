@@ -43,10 +43,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   const { auditCache } = await chrome.storage.session.get('auditCache');
+  function cacheToResults(entry) {
+    if (!entry) return null;
+    if (entry.results) return entry.results;
+    return {
+      policies: entry.policies || null,
+      loadBalancers: Object.values(entry.loadBalancers || {}).map((e) => e.result),
+    };
+  }
+
   const cached = auditCache?.[`${tenant}/${namespace}`];
 
   if (cached) {
-    renderResults(cached.results);
+    renderResults(cacheToResults(cached));
   } else {
     statusIcon.className = 'icon gray';
     statusText.textContent = 'Audit in progress...';
@@ -54,7 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.session.onChanged.addListener((changes) => {
       if (!changes.auditCache) return;
       const entry = changes.auditCache.newValue?.[`${tenant}/${namespace}`];
-      if (entry) renderResults(entry.results);
+      if (entry) renderResults(cacheToResults(entry));
     });
   }
 
@@ -123,34 +132,50 @@ document.addEventListener('DOMContentLoaded', async () => {
       const lbEl = document.createElement('details');
       lbEl.className = `lb-detail ${lb.pass ? 'lb-pass' : 'lb-fail'}`;
 
+      const skipCount = lb.skipped?.length || 0;
+      const passCount = lb.passed?.length || 0;
+      const failCount = lb.diffs.length;
       const summary = document.createElement('summary');
-      summary.textContent = `${lb.pass ? '✓' : '✗'} ${lb.name}`;
-      if (!lb.pass) summary.textContent += ` (${lb.diffs.length})`;
+      const parts = [];
+      if (passCount) parts.push(`${passCount} passed`);
+      if (failCount) parts.push(`${failCount} failed`);
+      if (skipCount) parts.push(`${skipCount} skipped`);
+      summary.textContent = `${lb.pass ? '✓' : '✗'} ${lb.name} (${parts.join(', ')})`;
       lbEl.appendChild(summary);
 
-      if (!lb.pass) {
-        const list = document.createElement('ul');
-        list.className = 'diff-list';
-        for (const d of lb.diffs) {
-          const li = document.createElement('li');
-          li.className = 'diff-item';
-          let text = d.path;
-          if (d.type === 'MISSING') {
-            text += ' — missing';
-          } else {
-            text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
-          }
-          li.textContent = text;
-          if (d.explanation) {
-            const reason = document.createElement('div');
-            reason.className = 'diff-reason';
-            reason.textContent = d.explanation.reason;
-            li.appendChild(reason);
-          }
-          list.appendChild(li);
+      const list = document.createElement('ul');
+      list.className = 'diff-list';
+      for (const d of lb.diffs) {
+        const li = document.createElement('li');
+        li.className = 'diff-item diff-fail';
+        let text = d.path;
+        if (d.type === 'MISSING') {
+          text += ' — missing';
+        } else {
+          text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
         }
-        lbEl.appendChild(list);
+        li.textContent = text;
+        if (d.explanation) {
+          const reason = document.createElement('div');
+          reason.className = 'diff-reason';
+          reason.textContent = d.explanation.reason;
+          li.appendChild(reason);
+        }
+        list.appendChild(li);
       }
+      if (skipCount) {
+        const skipLi = document.createElement('li');
+        skipLi.className = 'diff-item diff-skip';
+        skipLi.textContent = `Skipped: ${lb.skipped.map((s) => s.label).join(', ')}`;
+        list.appendChild(skipLi);
+      }
+      if (passCount) {
+        const passLi = document.createElement('li');
+        passLi.className = 'diff-item diff-pass';
+        passLi.textContent = `Passed: ${lb.passed.map((p) => p.key).join(', ')}`;
+        list.appendChild(passLi);
+      }
+      lbEl.appendChild(list);
 
       detailsEl.appendChild(lbEl);
     }

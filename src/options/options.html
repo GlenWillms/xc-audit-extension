@@ -8,40 +8,44 @@
 <body>
   <div class="container">
     <h1>F5 XC Namespace Audit</h1>
-    <p class="hint">This extension uses your browser session to authenticate with the F5 XC API — just log in to the console and it works automatically.</p>
+    <p class="hint">Configure which security checks to enforce and how LBs can opt out via labels.</p>
 
-    <!-- Baseline -->
+    <!-- Baseline checks -->
     <section class="card">
-      <h2>Baseline Configuration</h2>
-      <p class="hint">The JSON baseline that load balancers are audited against.</p>
-      <textarea id="baselineEditor" rows="16" spellcheck="false"></textarea>
-      <div id="baselineError" class="error"></div>
+      <h2>Baseline Checks</h2>
+      <p class="hint">Toggle security checks on/off. Enabled checks are enforced for all LBs unless exempted via labels.</p>
+      <div id="checksContainer"></div>
       <div class="button-row">
-        <button id="saveBaseline" class="btn-primary">Save</button>
-        <button id="resetBaseline" class="btn-secondary">Reset to Default</button>
-        <label class="btn-secondary file-upload">
-          Upload JSON
-          <input type="file" id="uploadBaseline" accept=".json" hidden>
-        </label>
+        <button id="saveChecks" class="btn-primary">Save</button>
+        <button id="resetChecks" class="btn-secondary">Reset to Defaults</button>
       </div>
-      <div id="baselineStatus" class="status"></div>
+      <div id="checksStatus" class="status"></div>
     </section>
 
-    <!-- Explanations -->
+    <!-- Namespace policies -->
     <section class="card">
-      <h2>Explanations</h2>
-      <p class="hint">Maps config paths to human-readable reasons and remediation steps.</p>
-      <textarea id="explanationsEditor" rows="12" spellcheck="false"></textarea>
-      <div id="explanationsError" class="error"></div>
+      <h2>Namespace Service Policies</h2>
+      <p class="hint">Expected service policies applied at the namespace level.</p>
+      <textarea id="policiesEditor" rows="8" spellcheck="false"></textarea>
+      <div id="policiesError" class="error"></div>
       <div class="button-row">
-        <button id="saveExplanations" class="btn-primary">Save</button>
-        <button id="resetExplanations" class="btn-secondary">Reset to Default</button>
-        <label class="btn-secondary file-upload">
-          Upload JSON
-          <input type="file" id="uploadExplanations" accept=".json" hidden>
-        </label>
+        <button id="savePolicies" class="btn-primary">Save</button>
+        <button id="resetPolicies" class="btn-secondary">Reset to Default</button>
       </div>
-      <div id="explanationsStatus" class="status"></div>
+      <div id="policiesStatus" class="status"></div>
+    </section>
+
+    <!-- Exemption map -->
+    <section class="card">
+      <h2>Exemption Map</h2>
+      <p class="hint">Maps exemption codes to baseline keys. Add labels like <code>xc-audit-ignore-apid=true</code> on LB objects to skip checks.</p>
+      <div id="exemptionContainer"></div>
+      <div class="button-row">
+        <button id="saveExemptions" class="btn-primary">Save</button>
+        <button id="resetExemptions" class="btn-secondary">Reset to Defaults</button>
+        <button id="registerLabels" class="btn-secondary">Register Labels in XC</button>
+      </div>
+      <div id="exemptionStatus" class="status"></div>
     </section>
 
     <!-- Settings -->
@@ -51,14 +55,29 @@
         <input type="checkbox" id="autoAudit" checked>
         <span>Auto-audit on page load</span>
       </label>
-      <label class="setting-row">
-        <span>Cache TTL (seconds)</span>
-        <input type="number" id="cacheTtl" value="300" min="0" max="3600" style="width:80px">
-      </label>
       <div class="button-row">
         <button id="saveSettings" class="btn-primary">Save Settings</button>
       </div>
       <div id="settingsStatus" class="status"></div>
+    </section>
+
+    <!-- Raw JSON (power users) -->
+    <section class="card">
+      <details>
+        <summary class="raw-toggle">Raw JSON (advanced)</summary>
+        <div class="raw-section">
+          <h3>Baseline</h3>
+          <textarea id="baselineEditor" rows="14" spellcheck="false"></textarea>
+          <div id="baselineError" class="error"></div>
+          <h3>Explanations</h3>
+          <textarea id="explanationsEditor" rows="10" spellcheck="false"></textarea>
+          <div id="explanationsError" class="error"></div>
+          <div class="button-row">
+            <button id="saveRawJson" class="btn-primary">Save Raw JSON</button>
+          </div>
+          <div id="rawStatus" class="status"></div>
+        </div>
+      </details>
     </section>
   </div>
 

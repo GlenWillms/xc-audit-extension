@@ -95,6 +95,49 @@
   color: #055160;
 }
 
+/* Result sections */
+.xc-audit-section {
+  margin-bottom: 8px;
+}
+
+.xc-audit-section:last-child {
+  margin-bottom: 0;
+}
+
+.xc-audit-section-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #eee;
+}
+
+.xc-audit-section-fail .xc-audit-section-header { color: #721c24; }
+.xc-audit-section-skip .xc-audit-section-header { color: #856404; }
+.xc-audit-section-pass .xc-audit-section-header { color: #155724; }
+
+.xc-audit-skipped-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  margin: 2px 4px 2px 0;
+  background: #fff3cd;
+  color: #664d03;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.xc-audit-passed-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  margin: 2px 4px 2px 0;
+  background: #d4edda;
+  color: #155724;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
 /* Setup banner */
 .xc-audit-setup-banner {
   position: fixed;

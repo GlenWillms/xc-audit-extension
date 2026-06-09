@@ -8,10 +8,14 @@
   function init() {
     checkPage();
 
-    chrome.runtime.onMessage.addListener((message) => {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.type === 'TRIGGER_REAUDIT') {
         removeAllBadges();
         chrome.runtime.sendMessage({ type: 'CLEAR_CACHE' }, () => checkPage(true));
+      }
+      if (message.type === 'REGISTER_LABELS') {
+        registerLabels(message.labels).then(sendResponse);
+        return true;
       }
     });
 
@@ -75,10 +79,28 @@
       if (!lbListResp.ok) throw new Error(`API ${lbListResp.status}`);
       const lbList = (await lbListResp.json()).items || [];
 
+      const lbVersions = lbList.map((lb) => ({
+        name: lb.name,
+        version: lb.resource_version || lb.metadata?.resource_version || null,
+      }));
+
+      let staleLbs = lbVersions.map((v) => v.name);
+      let freshResults = {};
+
+      if (!force) {
+        const check = await chrome.runtime.sendMessage({
+          type: 'CHECK_VERSIONS', tenant, namespace, lbVersions,
+        });
+        if (check) {
+          staleLbs = check.stale || [];
+          freshResults = check.fresh || {};
+        }
+      }
+
       const lbConfigs = (
         await Promise.all(
-          lbList.map((lb) =>
-            fetch(apiUrl(`/api/config/namespaces/${namespace}/http_loadbalancers/${lb.name}`))
+          staleLbs.map((name) =>
+            fetch(apiUrl(`/api/config/namespaces/${namespace}/http_loadbalancers/${name}`))
               .then((r) => (r.ok ? r.json() : null))
               .catch(() => null)
           )
@@ -86,11 +108,20 @@
       ).filter(Boolean);
 
       chrome.runtime.sendMessage(
-        { type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT', tenant, namespace, policies, lbConfigs },
+        {
+          type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT',
+          tenant, namespace, policies, lbConfigs, lbVersions,
+        },
         (response) => {
           if (chrome.runtime.lastError) return;
           if (response?.type === 'AUDIT_RESULTS') {
-            auditResults = response.data;
+            const data = response.data;
+            for (const [name, result] of Object.entries(freshResults)) {
+              if (!data.loadBalancers.find((lb) => lb.name === name)) {
+                data.loadBalancers.push(result);
+              }
+            }
+            auditResults = data;
             observeAndInject();
           }
         }
@@ -135,25 +166,49 @@
   function buildDetailRow(result) {
     const row = document.createElement('div');
     row.className = 'xc-audit-detail-row';
+    let html = '';
 
-    let html = `<div class="xc-audit-detail-header">${result.diffs.length} issue(s)</div>`;
-    for (const d of result.diffs) {
-      html += `<div class="xc-audit-issue">`;
-      html += `<div class="xc-audit-issue-path">${escapeHtml(d.path)}</div>`;
-      if (d.type === 'MISSING') {
-        html += `<div class="xc-audit-issue-detail">Configuration is <strong>missing</strong></div>`;
-      } else {
-        html += `<div class="xc-audit-issue-detail">Expected: <code>${escapeHtml(fmt(d.expected))}</code></div>`;
-        html += `<div class="xc-audit-issue-detail">Found: <code>${escapeHtml(fmt(d.found))}</code></div>`;
-      }
-      if (d.explanation) {
-        html += `<div class="xc-audit-reason">${escapeHtml(d.explanation.reason)}</div>`;
-        if (d.explanation.next_step) {
-          html += `<div class="xc-audit-fix">${escapeHtml(d.explanation.next_step)}</div>`;
+    if (result.diffs.length) {
+      html += `<div class="xc-audit-section xc-audit-section-fail">`;
+      html += `<div class="xc-audit-section-header">Failed (${result.diffs.length})</div>`;
+      for (const d of result.diffs) {
+        html += `<div class="xc-audit-issue">`;
+        html += `<div class="xc-audit-issue-path">${escapeHtml(d.path)}</div>`;
+        if (d.type === 'MISSING') {
+          html += `<div class="xc-audit-issue-detail">Configuration is <strong>missing</strong></div>`;
+        } else {
+          html += `<div class="xc-audit-issue-detail">Expected: <code>${escapeHtml(fmt(d.expected))}</code></div>`;
+          html += `<div class="xc-audit-issue-detail">Found: <code>${escapeHtml(fmt(d.found))}</code></div>`;
         }
+        if (d.explanation) {
+          html += `<div class="xc-audit-reason">${escapeHtml(d.explanation.reason)}</div>`;
+          if (d.explanation.next_step) {
+            html += `<div class="xc-audit-fix">${escapeHtml(d.explanation.next_step)}</div>`;
+          }
+        }
+        html += `</div>`;
       }
       html += `</div>`;
     }
+
+    if (result.skipped?.length) {
+      html += `<div class="xc-audit-section xc-audit-section-skip">`;
+      html += `<div class="xc-audit-section-header">Skipped (${result.skipped.length})</div>`;
+      for (const s of result.skipped) {
+        html += `<span class="xc-audit-skipped-tag">${escapeHtml(s.label)}</span>`;
+      }
+      html += `</div>`;
+    }
+
+    if (result.passed?.length) {
+      html += `<div class="xc-audit-section xc-audit-section-pass">`;
+      html += `<div class="xc-audit-section-header">Passed (${result.passed.length})</div>`;
+      for (const p of result.passed) {
+        html += `<span class="xc-audit-passed-tag">${escapeHtml(p.key)}</span>`;
+      }
+      html += `</div>`;
+    }
+
     row.innerHTML = html;
     return row;
   }
@@ -171,24 +226,26 @@
       const result = auditResults.loadBalancers.find((lb) => lb.name === lbName);
       if (!result) continue;
 
+      const skipCount = result.skipped?.length || 0;
+      const passCount = result.passed?.length || 0;
+      const failCount = result.diffs.length;
       const badge = document.createElement('span');
       badge.className = `xc-audit-badge ${result.pass ? 'xc-audit-pass' : 'xc-audit-fail'}`;
-      badge.textContent = result.pass
-        ? 'PASS'
-        : `FAIL (${result.diffs.length})`;
 
-      if (result.pass) {
-        badge.title = 'All baseline checks passed';
-      } else {
-        badge.title = 'Click to toggle details';
-        const detailRow = buildDetailRow(result);
-        detailRow.style.display = 'none';
-        bodyRow.insertAdjacentElement('afterend', detailRow);
-        badge.addEventListener('click', (e) => {
-          e.stopPropagation();
-          detailRow.style.display = detailRow.style.display === 'none' ? '' : 'none';
-        });
-      }
+      const parts = [];
+      if (passCount) parts.push(`${passCount} passed`);
+      if (failCount) parts.push(`${failCount} failed`);
+      if (skipCount) parts.push(`${skipCount} skipped`);
+      badge.textContent = (result.pass ? 'PASS' : 'FAIL') + (parts.length ? ` (${parts.join(', ')})` : '');
+      badge.title = 'Click to toggle details';
+
+      const detailRow = buildDetailRow(result);
+      detailRow.style.display = 'none';
+      bodyRow.insertAdjacentElement('afterend', detailRow);
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        detailRow.style.display = detailRow.style.display === 'none' ? '' : 'none';
+      });
 
       nameEl.insertAdjacentElement('afterend', badge);
     }
@@ -201,6 +258,35 @@
     banner.className = 'xc-audit-setup-banner';
     banner.textContent = 'F5 XC Audit: Session expired or not logged in. Please log in to the F5 XC console.';
     document.body.prepend(banner);
+  }
+
+  async function registerLabels(labels) {
+    const csrf = await getCsrf();
+    if (!csrf) return { error: 'No CSRF token available. Navigate to the XC console first.' };
+
+    const results = [];
+    for (const { key, value } of labels) {
+      try {
+        const resp = await fetch(
+          `/api/config/namespaces/shared/known_label/create?csrf=${csrf}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ namespace: 'shared', key, value }),
+          }
+        );
+        if (resp.ok) {
+          results.push({ key, value, status: 'created' });
+        } else {
+          const body = await resp.text();
+          const alreadyExists = body.includes('already exists') || resp.status === 409;
+          results.push({ key, value, status: alreadyExists ? 'exists' : 'error', detail: resp.status });
+        }
+      } catch (err) {
+        results.push({ key, value, status: 'error', detail: err.message });
+      }
+    }
+    return { results };
   }
 
   function removeAllBadges() {
