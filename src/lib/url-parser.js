@@ -1,5 +1,5 @@
 const XC_URL_PATTERN =
-  /^https:\/\/([^.]+)\.console\.ves\.volterra\.io\/web\/workspaces\/([^/]+)\/(.+)/;
+  /^https:\/\/([^.]+)\.console\.ves\.volterra\.io\/(?:managed_tenant\/([^/]+)\/)?web\/workspaces\/([^/]+)\/(.+)/;
 
 const NAMESPACE_SEGMENT = /namespaces\/([^/]+)/;
 const LB_LIST_PATH = /manage\/load[_-]?balancers\/http[_-]?load[_-]?balancers\/?$/i;
@@ -7,12 +7,13 @@ const LB_LIST_PATH = /manage\/load[_-]?balancers\/http[_-]?load[_-]?balancers\/?
 function parseXcUrl(url) {
   const match = url.match(XC_URL_PATTERN);
   if (!match) return null;
-  const subPath = match[3];
+  const subPath = match[4];
   const nsMatch = subPath.match(NAMESPACE_SEGMENT);
   return {
     tenant: match[1],
-    workspace: match[2],
-    namespace: nsMatch ? nsMatch[1] : match[2],
+    managedTenant: match[2] || null,
+    workspace: match[3],
+    namespace: nsMatch ? nsMatch[1] : match[3],
     subPath,
     isLbListPage: LB_LIST_PATH.test(subPath),
   };
