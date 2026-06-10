@@ -130,11 +130,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-async function handleCheckVersions({ tenant, namespace, lbVersions }) {
+function buildCacheKey(tenant, namespace, managedTenant) {
+  return managedTenant ? `${tenant}/${managedTenant}/${namespace}` : `${tenant}/${namespace}`;
+}
+
+async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersions }) {
   const { baseline, exemptionMap } = await chrome.storage.local.get(['baseline', 'exemptionMap']);
   const currentHash = await hashJson({ baseline, exemptionMap });
 
-  const cacheKey = `${tenant}/${namespace}`;
+  const cacheKey = buildCacheKey(tenant, namespace, managedTenant);
   const { auditCache } = await chrome.storage.session.get('auditCache');
   const cached = auditCache?.[cacheKey];
 
@@ -157,7 +161,7 @@ async function handleCheckVersions({ tenant, namespace, lbVersions }) {
   return { stale, fresh };
 }
 
-async function handleRunAudit({ tenant, namespace, policies, defaultPolicies, lbConfigs, lbVersions }, forceRefresh) {
+async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions }, forceRefresh) {
   const { baseline, explanations, exemptionMap, policyOverrides } =
     await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'policyOverrides']);
 
@@ -182,7 +186,7 @@ async function handleRunAudit({ tenant, namespace, policies, defaultPolicies, lb
   );
 
   const currentHash = await hashJson({ baseline, exemptionMap });
-  const cacheKey = `${tenant}/${namespace}`;
+  const cacheKey = buildCacheKey(tenant, namespace, managedTenant);
   const { auditCache = {} } = await chrome.storage.session.get('auditCache');
 
   const existing = auditCache[cacheKey] || {};

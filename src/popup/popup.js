@@ -1,5 +1,5 @@
 const XC_URL_PATTERN =
-  /^https:\/\/([^.]+)\.console\.ves\.volterra\.io\/web\/workspaces\/([^/]+)\/(.+)/;
+  /^https:\/\/([^.]+)\.console\.ves\.volterra\.io\/(?:managed_tenant\/([^/]+)\/)?web\/workspaces\/([^/]+)\/(.+)/;
 const NAMESPACE_SEGMENT = /namespaces\/([^/]+)/;
 const LB_LIST_PATH = /manage\/load[_-]?balancers\/http[_-]?load[_-]?balancers\/?$/i;
 
@@ -21,16 +21,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   const url = tab?.url || '';
   const match = url.match(XC_URL_PATTERN);
 
-  if (!match || !LB_LIST_PATH.test(match[3])) {
+  if (!match || !LB_LIST_PATH.test(match[4])) {
     statusIcon.className = 'icon gray';
     statusText.textContent = 'Not on LB list page';
     notOnPage.style.display = 'block';
     return;
   }
 
-  const nsMatch = match[3].match(NAMESPACE_SEGMENT);
+  const nsMatch = match[4].match(NAMESPACE_SEGMENT);
   const tenant = match[1];
-  const namespace = nsMatch ? nsMatch[1] : match[2];
+  const managedTenant = match[2] || null;
+  const namespace = nsMatch ? nsMatch[1] : match[3];
+
+  if (managedTenant) {
+    const header = document.querySelector('.header');
+    const versionSpan = document.getElementById('version');
+    header.firstChild.textContent = `F5 XC Audit — ${managedTenant} `;
+    header.appendChild(versionSpan);
+  }
 
   statusText.textContent = 'Loading...';
   statusIcon.className = 'icon gray';
@@ -52,7 +60,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
   }
 
-  const cached = auditCache?.[`${tenant}/${namespace}`];
+  const cacheKey = managedTenant ? `${tenant}/${managedTenant}/${namespace}` : `${tenant}/${namespace}`;
+  const cached = auditCache?.[cacheKey];
 
   if (cached) {
     renderResults(cacheToResults(cached));
@@ -62,7 +71,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     chrome.storage.session.onChanged.addListener((changes) => {
       if (!changes.auditCache) return;
-      const entry = changes.auditCache.newValue?.[`${tenant}/${namespace}`];
+      const entry = changes.auditCache.newValue?.[cacheKey];
       if (entry) renderResults(cacheToResults(entry));
     });
   }

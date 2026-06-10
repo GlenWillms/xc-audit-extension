@@ -2,6 +2,7 @@
   let lastUrl = location.href;
   let auditResults = null;
   let debounceTimer = null;
+  let currentManagedTenant = null;
 
   // --- Initialization ---
 
@@ -52,7 +53,7 @@
       removeAllBadges();
       return;
     }
-    requestAudit(parsed.tenant, parsed.namespace, force);
+    requestAudit(parsed.tenant, parsed.namespace, parsed.managedTenant, force);
   }
 
   async function getCsrf(retries = 10) {
@@ -64,13 +65,16 @@
     return null;
   }
 
-  async function requestAudit(tenant, namespace, force) {
+  async function requestAudit(tenant, namespace, managedTenant, force) {
     try {
+      currentManagedTenant = managedTenant;
       const csrf = await getCsrf();
       if (!csrf) return;
 
+      const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
+
       function apiUrl(path) {
-        return `${path}?report_fields&csrf=${csrf}`;
+        return `${apiPrefix}${path}?report_fields&csrf=${csrf}`;
       }
 
       const [policies, defaultPolicies, lbListResp] = await Promise.all([
@@ -96,7 +100,7 @@
 
       if (!force) {
         const check = await chrome.runtime.sendMessage({
-          type: 'CHECK_VERSIONS', tenant, namespace, lbVersions,
+          type: 'CHECK_VERSIONS', tenant, namespace, managedTenant, lbVersions,
         });
         if (check) {
           staleLbs = check.stale || [];
@@ -117,7 +121,7 @@
       chrome.runtime.sendMessage(
         {
           type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT',
-          tenant, namespace, policies, defaultPolicies, lbConfigs, lbVersions,
+          tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions,
         },
         (response) => {
           if (chrome.runtime.lastError) return;
@@ -271,8 +275,9 @@
     const csrf = await getCsrf();
     if (!csrf) return { error: 'No CSRF token' };
     try {
+      const apiPrefix = currentManagedTenant ? `/managed_tenant/${currentManagedTenant}` : '';
       const resp = await fetch(
-        `/api/config/namespaces/${namespace}/active_service_policies?report_fields&csrf=${csrf}`
+        `${apiPrefix}/api/config/namespaces/${namespace}/active_service_policies?report_fields&csrf=${csrf}`
       );
       if (!resp.ok) return { error: `API ${resp.status}` };
       const policies = await resp.json();
@@ -286,8 +291,9 @@
     const csrf = await getCsrf();
     if (!csrf) return { error: 'No CSRF token available. Navigate to the XC console first.' };
 
+    const apiPrefix = currentManagedTenant ? `/managed_tenant/${currentManagedTenant}` : '';
     const post = async (path, body) => {
-      const resp = await fetch(`${path}?csrf=${csrf}`, {
+      const resp = await fetch(`${apiPrefix}${path}?csrf=${csrf}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
