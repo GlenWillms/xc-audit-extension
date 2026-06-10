@@ -6,9 +6,21 @@ Parked ideas for future consideration. Not committed to — just captured so the
 
 Support auditing LBs accessed through a parent/management tenant. The extension already captures managed tenant paths from network traffic (`/managed_tenant/CHILD/`), but the API calls and caching don't fully account for the managed tenant prefix yet.
 
-## Baseline Templates Library
+## Baseline Templates from Default Namespace LBs
 
-Ship multiple baseline templates for different use cases (e.g., "API Gateway", "Static Website", "Full WAF+API Security") that users can select from a dropdown instead of toggling individual checks.
+Instead of shipping static template files, use actual LB objects in the `default` namespace as live baseline templates. Each template LB serves as a reference configuration for a specific use case (e.g., "API Gateway", "Static Website", "Full WAF+API Security").
+
+**How it would work:**
+- Create example LBs in the `default` namespace — one per baseline template
+- Mark each template LB as "do not advertise" so it's never actually serving traffic
+- At least one LB acts as the default template (all LBs are compared against it unless overridden)
+- To associate a production LB with a specific template, add a label pointing to the template LB name (e.g., `xc-audit-template=api-gateway`)
+- The extension fetches the template LB's config at audit time and uses it as the baseline for comparison
+
+**Benefits:**
+- Templates are managed as real XC objects — no JSON editing required
+- Changes to a template LB automatically apply to all associated LBs on the next audit
+- Teams can use familiar XC workflows to maintain baselines
 
 ## Export/Import Settings
 
