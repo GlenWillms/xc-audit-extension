@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     return String(val);
   }
 
-  function renderResults(data) {
+  async function renderResults(data) {
     const failCount = data.loadBalancers.filter((lb) => !lb.pass).length;
     const passCount = data.loadBalancers.length - failCount;
 
@@ -123,6 +123,60 @@ document.addEventListener('DOMContentLoaded', async () => {
         policyDetail.appendChild(list);
       }
 
+      const btnRow = document.createElement('div');
+      btnRow.className = 'policy-btn-row';
+
+      const setBaselineBtn = document.createElement('button');
+      setBaselineBtn.className = 'btn btn-sm btn-set-baseline';
+      setBaselineBtn.textContent = `Use ${namespace}'s policies as baseline`;
+      setBaselineBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        setBaselineBtn.disabled = true;
+        setBaselineBtn.textContent = 'Saving...';
+        try {
+          const resp = await chrome.tabs.sendMessage(tab.id, {
+            type: 'GET_POLICIES', namespace,
+          });
+          if (resp?.policies) {
+            await chrome.runtime.sendMessage({
+              type: 'SAVE_POLICY_OVERRIDE',
+              namespace,
+              policies: resp.policies,
+            });
+            await chrome.runtime.sendMessage({ type: 'CLEAR_CACHE' });
+            setBaselineBtn.textContent = `Override saved for ${namespace} — re-audit`;
+            setBaselineBtn.className = 'btn btn-sm btn-set-baseline-done';
+          } else {
+            setBaselineBtn.textContent = resp?.error || 'Failed to fetch policies';
+          }
+        } catch {
+          setBaselineBtn.textContent = 'Error — is the XC page open?';
+        }
+      });
+      btnRow.appendChild(setBaselineBtn);
+
+      const { policyOverrides } = await chrome.storage.local.get('policyOverrides');
+      if (policyOverrides?.[namespace]) {
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'btn btn-sm btn-secondary';
+        clearBtn.textContent = 'Clear override (use default)';
+        clearBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await chrome.runtime.sendMessage({ type: 'CLEAR_POLICY_OVERRIDE', namespace });
+          await chrome.runtime.sendMessage({ type: 'CLEAR_CACHE' });
+          clearBtn.textContent = 'Cleared — re-audit';
+          clearBtn.disabled = true;
+        });
+        btnRow.appendChild(clearBtn);
+
+        const overrideNote = document.createElement('div');
+        overrideNote.className = 'policy-override-note';
+        overrideNote.textContent = `Using override for ${namespace} (not default namespace)`;
+        policyDetail.appendChild(overrideNote);
+      }
+
+      policyDetail.appendChild(btnRow);
+
       policyResult.appendChild(policyDetail);
     }
 
@@ -166,7 +220,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (skipCount) {
         const skipLi = document.createElement('li');
         skipLi.className = 'diff-item diff-skip';
-        skipLi.textContent = `Skipped: ${lb.skipped.map((s) => s.label).join(', ')}`;
+        skipLi.textContent = `Skipped: ${lb.skipped.map((s) => `${s.label} (${s.labelKey}=true)`).join(', ')}`;
         list.appendChild(skipLi);
       }
       if (passCount) {

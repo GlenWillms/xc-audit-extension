@@ -5,7 +5,7 @@ const CHECK_REGISTRY = [
   { category: 'Web Application Firewall', key: 'app_firewall', label: 'App Firewall', code: 'ignore-waf' },
   { category: 'DDoS Protection', key: 'ddos_mitigation_rules', label: 'DDoS Mitigation Rules', code: 'ignore-ddos' },
   { category: 'DDoS Protection', key: 'l7_ddos_protection', label: 'L7 DDoS Protection', code: 'ignore-ddos' },
-  { category: 'API Security', key: 'disable_api_discovery', label: 'API Discovery', code: 'ignore-apid' },
+  { category: 'API Security', key: 'enable_api_discovery', label: 'API Discovery', code: 'ignore-apid' },
   { category: 'API Security', key: 'disable_api_definition', label: 'API Definition', code: 'ignore-apip' },
   { category: 'API Security', key: 'disable_api_testing', label: 'API Testing', code: 'ignore-apip' },
   { category: 'Bot & Client Protection', key: 'disable_bot_defense', label: 'Bot Defense', code: 'ignore-bot' },
@@ -23,7 +23,7 @@ async function loadAll() {
     await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'settings']);
 
   renderChecks(baseline);
-  renderPolicies(baseline);
+  renderPolicies();
   renderExemptionMap(exemptionMap || {});
   renderRawJson(baseline, explanations);
 
@@ -35,6 +35,7 @@ async function loadAll() {
 
 function renderChecks(baseline) {
   const spec = baseline?.lb_baseline?.spec || {};
+  $('wafPolicyName').value = spec.app_firewall?.name || '';
   const container = $('checksContainer');
   container.innerHTML = '';
 
@@ -65,7 +66,7 @@ function renderChecks(baseline) {
       const info = document.createElement('div');
       info.className = 'check-info';
       info.innerHTML = `<span class="check-label">${check.label}</span>` +
-        `<span class="check-code">Label: <code>${check.code}</code></span>`;
+        `<span class="check-code">Label: <code>xc-audit-${check.code}=true</code></span>`;
 
       row.appendChild(toggle);
       row.appendChild(info);
@@ -76,9 +77,42 @@ function renderChecks(baseline) {
   }
 }
 
-function renderPolicies(baseline) {
-  const policies = baseline?.namespace_baseline?.service_policies || [];
-  $('policiesEditor').value = JSON.stringify(policies, null, 2);
+async function renderPolicies() {
+  const container = $('currentPolicies');
+  const { baseline, policyOverrides } = await chrome.storage.local.get(['baseline', 'policyOverrides']);
+  const staticPolicies = baseline?.namespace_baseline?.service_policies;
+
+  if (staticPolicies && Array.isArray(staticPolicies) && staticPolicies.length) {
+    container.innerHTML = `<div class="policy-source">Static fallback baseline:</div>` +
+      staticPolicies.map((p) =>
+        `<div class="policy-item">${p.name} <span class="policy-ns">(${p.namespace})</span></div>`
+      ).join('');
+  } else {
+    container.innerHTML = `<div class="policy-source">Policy baseline is fetched dynamically from the <code>default</code> namespace at audit time.</div>`;
+  }
+
+  const overrides = policyOverrides || {};
+  const overridesList = $('overridesList');
+  overridesList.innerHTML = '';
+  const nsNames = Object.keys(overrides);
+  if (nsNames.length === 0) {
+    overridesList.innerHTML = '<div class="policy-source">No namespace overrides set.</div>';
+  } else {
+    for (const ns of nsNames) {
+      const row = document.createElement('div');
+      row.className = 'override-row';
+      const policies = overrides[ns]?.service_policies || [];
+      row.innerHTML = `<strong>${ns}</strong>: ${policies.map((p) => p.name).join(', ') || '(empty)'}` +
+        ` <button class="btn-danger btn-sm override-remove" data-ns="${ns}">Remove</button>`;
+      row.querySelector('.override-remove').addEventListener('click', async () => {
+        delete overrides[ns];
+        await chrome.storage.local.set({ policyOverrides: overrides });
+        renderPolicies();
+        showStatus('policiesStatus', `Override for ${ns} removed`, 'success');
+      });
+      overridesList.appendChild(row);
+    }
+  }
 }
 
 function renderExemptionMap(map) {
@@ -138,14 +172,14 @@ function collectChecksToBaseline() {
       }
     }
 
+    const wafName = $('wafPolicyName').value.trim();
+    if ('app_firewall' in newSpec) {
+      newSpec.app_firewall = wafName ? { name: wafName } : {};
+    }
+
     b.lb_baseline.spec = newSpec;
     return b;
   });
-}
-
-function collectPolicies() {
-  const text = $('policiesEditor').value;
-  return JSON.parse(text);
 }
 
 function collectExemptionMap() {
@@ -164,13 +198,40 @@ function collectExemptionMap() {
   return map;
 }
 
+async function resetAllToDefaults() {
+  const [baselineResp, explanationsResp, exemptionResp] = await Promise.all([
+    fetch(chrome.runtime.getURL('assets/baseline_lb_http.json')),
+    fetch(chrome.runtime.getURL('assets/explanations.json')),
+    fetch(chrome.runtime.getURL('assets/exemption_map.json')),
+  ]);
+  const baseline = await baselineResp.json();
+  const explanations = await explanationsResp.json();
+  const exemptionMap = await exemptionResp.json();
+
+  await chrome.storage.local.set({
+    baseline,
+    explanations,
+    exemptionMap,
+    settings: { autoAudit: true },
+  });
+  await chrome.storage.local.remove('policyOverrides');
+
+  renderChecks(baseline);
+  renderPolicies();
+  renderExemptionMap(exemptionMap);
+  renderRawJson(baseline, explanations);
+  $('autoAudit').checked = true;
+}
+
 function bindEvents() {
+  $('resetAll').addEventListener('click', async () => {
+    if (!confirm('Reset all settings to defaults? This will clear any customizations and namespace policy overrides.')) return;
+    await resetAllToDefaults();
+    showStatus('resetAllStatus', 'All settings reset to defaults', 'success');
+  });
+
   $('saveChecks').addEventListener('click', async () => {
     const baseline = await collectChecksToBaseline();
-    try {
-      const policies = collectPolicies();
-      baseline.namespace_baseline = { service_policies: policies };
-    } catch {}
     await chrome.storage.local.set({ baseline });
     renderRawJson(baseline, null);
     showStatus('checksStatus', 'Saved', 'success');
@@ -181,32 +242,40 @@ function bindEvents() {
     const baseline = await resp.json();
     await chrome.storage.local.set({ baseline });
     renderChecks(baseline);
-    renderPolicies(baseline);
+    renderPolicies();
     renderRawJson(baseline, null);
     showStatus('checksStatus', 'Reset to defaults', 'success');
   });
 
-  $('savePolicies').addEventListener('click', async () => {
-    try {
-      const policies = collectPolicies();
-      const { baseline = {} } = await chrome.storage.local.get('baseline');
-      baseline.namespace_baseline = { service_policies: policies };
-      await chrome.storage.local.set({ baseline });
-      $('policiesError').textContent = '';
-      showStatus('policiesStatus', 'Saved', 'success');
-    } catch (e) {
-      $('policiesError').textContent = `Invalid JSON: ${e.message}`;
+  $('fetchDefaultPolicies').addEventListener('click', async () => {
+    const tabs = await chrome.tabs.query({ url: 'https://*.console.ves.volterra.io/*' });
+    if (!tabs.length) {
+      showStatus('policiesStatus', 'No XC console tab open. Open the XC console first.', 'error');
+      return;
     }
-  });
-
-  $('resetPolicies').addEventListener('click', async () => {
-    const resp = await fetch(chrome.runtime.getURL('assets/baseline_lb_http.json'));
-    const baseline = await resp.json();
-    const { baseline: current = {} } = await chrome.storage.local.get('baseline');
-    current.namespace_baseline = baseline.namespace_baseline;
-    await chrome.storage.local.set({ baseline: current });
-    renderPolicies(current);
-    showStatus('policiesStatus', 'Reset to default', 'success');
+    showStatus('policiesStatus', 'Fetching...', 'success');
+    try {
+      const resp = await chrome.tabs.sendMessage(tabs[0].id, {
+        type: 'GET_POLICIES', namespace: 'default',
+      });
+      if (resp?.policies) {
+        const policies = resp.policies.service_policies || resp.policies;
+        const display = $('currentPolicies');
+        if (Array.isArray(policies) && policies.length) {
+          display.innerHTML = `<div class="policy-source">Current <code>default</code> namespace policies:</div>` +
+            policies.map((p) =>
+              `<div class="policy-item">${p.name} <span class="policy-ns">(${p.namespace})</span></div>`
+            ).join('');
+        } else {
+          display.innerHTML = `<div class="policy-source">The <code>default</code> namespace has no active service policies.</div>`;
+        }
+        showStatus('policiesStatus', 'Fetched successfully', 'success');
+      } else {
+        showStatus('policiesStatus', resp?.error || 'Failed to fetch', 'error');
+      }
+    } catch {
+      showStatus('policiesStatus', 'Could not reach the XC console tab.', 'error');
+    }
   });
 
   $('saveExemptions').addEventListener('click', async () => {
@@ -252,14 +321,18 @@ function bindEvents() {
       const r = response?.results || [];
       const created = r.filter((x) => x.status === 'created').length;
       const exists = r.filter((x) => x.status === 'exists').length;
-      const errors = r.filter((x) => x.status === 'error').length;
+      const errItems = r.filter((x) => x.status === 'error');
 
       const parts = [];
       if (created) parts.push(`${created} created`);
       if (exists) parts.push(`${exists} already exist`);
-      if (errors) parts.push(`${errors} failed`);
+      if (errItems.length) parts.push(`${errItems.length} failed`);
 
-      showStatus('exemptionStatus', `Labels registered: ${parts.join(', ')}`, errors ? 'error' : 'success');
+      let msg = `Labels: ${parts.join(', ')}`;
+      if (errItems.length) {
+        msg += '\n' + errItems.map((e) => `  ${e.key}: ${e.detail}`).join('\n');
+      }
+      showStatus('exemptionStatus', msg, errItems.length ? 'error' : 'success');
     } catch {
       showStatus('exemptionStatus', 'Could not reach the XC console tab. Refresh the page and try again.', 'error');
     }

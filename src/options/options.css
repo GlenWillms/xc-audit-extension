@@ -55,7 +55,7 @@ button, .file-upload {
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 
 /* Status */
-.status { margin-top: 8px; font-size: 13px; padding: 6px 10px; border-radius: 4px; display: none; }
+.status { margin-top: 8px; font-size: 13px; padding: 6px 10px; border-radius: 4px; display: none; white-space: pre-wrap; }
 .status.success { display: block; background: #d4edda; color: #155724; }
 .status.error { display: block; background: #f8d7da; color: #721c24; }
 .error { color: #dc3545; font-size: 12px; margin-top: 4px; }
@@ -148,6 +148,70 @@ textarea {
 .ex-code { width: 120px; }
 .ex-label { width: 160px; }
 .ex-keys { flex: 1; }
+
+/* Parameter inputs */
+.param-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #eee;
+}
+
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  font-size: 14px;
+}
+
+.param-label { flex-shrink: 0; color: #333; }
+
+.param-input {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+}
+
+/* Policy display */
+.policy-display { margin-bottom: 8px; }
+
+.policy-source {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.policy-source code { background: #f1f3f5; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+
+.policy-item {
+  padding: 4px 10px;
+  margin: 2px 0;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+}
+
+.policy-ns { color: #888; font-size: 12px; }
+
+.policy-overrides-section { margin-top: 10px; }
+
+.override-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 4px 0;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.override-row strong { min-width: 100px; }
+.override-remove { margin-left: auto; }
 
 /* Raw JSON toggle */
 .raw-toggle {

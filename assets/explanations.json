@@ -15,9 +15,9 @@
         "reason": "TLS configuration is invalid.",
         "next_step": "Enable 'HTTPS Auto-Cert' or configure manual 'HTTPS' ports. HSTS must be enabled."
     },
-    "spec.disable_api_discovery": {
-        "reason": "API Discovery is enabled. API Discovery is not included in this baseline.",
-        "next_step": "If API Security is required, refer to the API Security baseline configuration."
+    "spec.enable_api_discovery": {
+        "reason": "API Discovery is not enabled.",
+        "next_step": "Enable API Discovery on this load balancer to comply with baseline."
     },
     "spec.advertise_on_public_default_vip": {
         "reason": "The load balancer is not advertising on the public default VIP as per baseline.",

@@ -1,16 +1,5 @@
 {
-  "namespace_baseline": {
-      "service_policies": [
-        {
-          "name": "blocked-filetypes",
-          "namespace": "g-willms"
-        },
-        {
-          "name": "ves-io-allow-all",
-          "namespace": "shared"
-        }
-      ]
-  },
+  "namespace_baseline": {},
   "lb_baseline": {
     "spec": {
       "__ONE_OF__tls_hsts": [
@@ -33,7 +22,7 @@
       },
       "service_policies_from_namespace": {},
       "disable_trust_client_ip_headers": {},
-      "disable_api_discovery": {},
+      "enable_api_discovery": {},
       "disable_bot_defense": {},
       "default_sensitive_data_policy": {},
       "disable_api_testing": {},

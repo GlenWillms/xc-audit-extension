@@ -17,6 +17,10 @@
         registerLabels(message.labels).then(sendResponse);
         return true;
       }
+      if (message.type === 'GET_POLICIES') {
+        fetchPolicies(message.namespace).then(sendResponse);
+        return true;
+      }
     });
 
     const titleEl = document.querySelector('head > title') || document.head;
@@ -69,8 +73,11 @@
         return `${path}?report_fields&csrf=${csrf}`;
       }
 
-      const [policies, lbListResp] = await Promise.all([
+      const [policies, defaultPolicies, lbListResp] = await Promise.all([
         fetch(apiUrl(`/api/config/namespaces/${namespace}/active_service_policies`))
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+        fetch(apiUrl(`/api/config/namespaces/default/active_service_policies`))
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),
         fetch(apiUrl(`/api/config/namespaces/${namespace}/http_loadbalancers`)),
@@ -110,7 +117,7 @@
       chrome.runtime.sendMessage(
         {
           type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT',
-          tenant, namespace, policies, lbConfigs, lbVersions,
+          tenant, namespace, policies, defaultPolicies, lbConfigs, lbVersions,
         },
         (response) => {
           if (chrome.runtime.lastError) return;
@@ -195,7 +202,7 @@
       html += `<div class="xc-audit-section xc-audit-section-skip">`;
       html += `<div class="xc-audit-section-header">Skipped (${result.skipped.length})</div>`;
       for (const s of result.skipped) {
-        html += `<span class="xc-audit-skipped-tag">${escapeHtml(s.label)}</span>`;
+        html += `<span class="xc-audit-skipped-tag">${escapeHtml(s.label)} <code>${escapeHtml(s.labelKey)}=true</code></span>`;
       }
       html += `</div>`;
     }
@@ -260,31 +267,71 @@
     document.body.prepend(banner);
   }
 
+  async function fetchPolicies(namespace) {
+    const csrf = await getCsrf();
+    if (!csrf) return { error: 'No CSRF token' };
+    try {
+      const resp = await fetch(
+        `/api/config/namespaces/${namespace}/active_service_policies?report_fields&csrf=${csrf}`
+      );
+      if (!resp.ok) return { error: `API ${resp.status}` };
+      const policies = await resp.json();
+      return { policies };
+    } catch (err) {
+      return { error: err.message };
+    }
+  }
+
   async function registerLabels(labels) {
     const csrf = await getCsrf();
     if (!csrf) return { error: 'No CSRF token available. Navigate to the XC console first.' };
 
+    const post = async (path, body) => {
+      const resp = await fetch(`${path}?csrf=${csrf}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text = await resp.text();
+      return { ok: resp.ok, status: resp.status, body: text };
+    };
+
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
     const results = [];
+
     for (const { key, value } of labels) {
       try {
-        const resp = await fetch(
-          `/api/config/namespaces/shared/known_label/create?csrf=${csrf}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ namespace: 'shared', key, value }),
-          }
+        const keyResp = await post(
+          '/api/config/namespaces/shared/known_label_key/create',
+          { namespace: 'shared', key }
         );
-        if (resp.ok) {
+        const keyOk = keyResp.ok || keyResp.body.includes('already exists') || keyResp.status === 409;
+        if (!keyOk) {
+          results.push({ key, value, status: 'error', detail: `key: ${keyResp.status}: ${keyResp.body.slice(0, 200)}` });
+          await delay(1500);
+          continue;
+        }
+
+        await delay(1500);
+
+        const valResp = await post(
+          '/api/config/namespaces/shared/known_label/create',
+          { namespace: 'shared', key, value }
+        );
+        if (valResp.ok) {
           results.push({ key, value, status: 'created' });
         } else {
-          const body = await resp.text();
-          const alreadyExists = body.includes('already exists') || resp.status === 409;
-          results.push({ key, value, status: alreadyExists ? 'exists' : 'error', detail: resp.status });
+          const exists = valResp.body.includes('already exists') || valResp.status === 409;
+          results.push({
+            key, value,
+            status: exists ? 'exists' : 'error',
+            detail: exists ? undefined : `val: ${valResp.status}: ${valResp.body.slice(0, 200)}`,
+          });
         }
       } catch (err) {
         results.push({ key, value, status: 'error', detail: err.message });
       }
+      await delay(1500);
     }
     return { results };
   }

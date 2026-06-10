@@ -10,11 +10,24 @@
     <h1>F5 XC Namespace Audit</h1>
     <p class="hint">Configure which security checks to enforce and how LBs can opt out via labels.</p>
 
+    <div class="button-row">
+      <button id="resetAll" class="btn-danger">Reset All to Defaults</button>
+    </div>
+    <div id="resetAllStatus" class="status"></div>
+
     <!-- Baseline checks -->
     <section class="card">
       <h2>Baseline Checks</h2>
       <p class="hint">Toggle security checks on/off. Enabled checks are enforced for all LBs unless exempted via labels.</p>
       <div id="checksContainer"></div>
+
+      <div class="param-section">
+        <label class="param-row">
+          <span class="param-label">App Firewall Policy Name</span>
+          <input type="text" id="wafPolicyName" placeholder="e.g. appfw-blocking" class="param-input">
+        </label>
+      </div>
+
       <div class="button-row">
         <button id="saveChecks" class="btn-primary">Save</button>
         <button id="resetChecks" class="btn-secondary">Reset to Defaults</button>
@@ -25,14 +38,16 @@
     <!-- Namespace policies -->
     <section class="card">
       <h2>Namespace Service Policies</h2>
-      <p class="hint">Expected service policies applied at the namespace level.</p>
-      <textarea id="policiesEditor" rows="8" spellcheck="false"></textarea>
-      <div id="policiesError" class="error"></div>
+      <p class="hint">By default, the extension fetches the <code>default</code> namespace's active service policies and uses them as the baseline. Use the popup to set per-namespace overrides.</p>
+      <div id="currentPolicies" class="policy-display"></div>
       <div class="button-row">
-        <button id="savePolicies" class="btn-primary">Save</button>
-        <button id="resetPolicies" class="btn-secondary">Reset to Default</button>
+        <button id="fetchDefaultPolicies" class="btn-secondary">Fetch from default namespace</button>
       </div>
       <div id="policiesStatus" class="status"></div>
+      <details class="policy-overrides-section">
+        <summary class="raw-toggle">Namespace overrides</summary>
+        <div id="overridesList" class="overrides-list"></div>
+      </details>
     </section>
 
     <!-- Exemption map -->

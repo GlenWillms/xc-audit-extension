@@ -131,7 +131,7 @@ export function applyExemptions(baselineSpec, lbLabels, exemptionMap) {
     for (const key of keys) {
       if (key in filtered) {
         delete filtered[key];
-        skipped.push({ code, key, label: entry.label || code });
+        skipped.push({ code, key, label: entry.label || code, labelKey: `xc-audit-${code}` });
       }
     }
   }

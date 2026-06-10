@@ -105,6 +105,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.session.remove('auditCache').then(() => sendResponse({ ok: true }));
     return true;
   }
+  if (message.type === 'SAVE_POLICY_OVERRIDE') {
+    savePolicyOverride(message.namespace, message.policies).then(sendResponse);
+    return true;
+  }
+  if (message.type === 'CLEAR_POLICY_OVERRIDE') {
+    clearPolicyOverride(message.namespace).then(sendResponse);
+    return true;
+  }
   if (message.type === 'CHECK_VERSIONS') {
     handleCheckVersions(message).then(sendResponse);
     return true;
@@ -149,18 +157,26 @@ async function handleCheckVersions({ tenant, namespace, lbVersions }) {
   return { stale, fresh };
 }
 
-async function handleRunAudit({ tenant, namespace, policies, lbConfigs, lbVersions }, forceRefresh) {
-  const { baseline, explanations, exemptionMap } =
-    await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap']);
+async function handleRunAudit({ tenant, namespace, policies, defaultPolicies, lbConfigs, lbVersions }, forceRefresh) {
+  const { baseline, explanations, exemptionMap, policyOverrides } =
+    await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'policyOverrides']);
 
   if (!baseline) {
     return { type: 'AUDIT_ERROR', error: 'INVALID_BASELINE', message: 'No baseline configured.' };
   }
 
+  const effectiveBaseline = { ...baseline };
+  const nsOverride = policyOverrides?.[namespace];
+  if (nsOverride) {
+    effectiveBaseline.namespace_baseline = nsOverride;
+  } else if (defaultPolicies) {
+    effectiveBaseline.namespace_baseline = defaultPolicies;
+  }
+
   const results = runFullAudit(
     lbConfigs || [],
     policies,
-    baseline,
+    effectiveBaseline,
     explanations || {},
     exemptionMap || {}
   );
@@ -190,6 +206,20 @@ async function handleRunAudit({ tenant, namespace, policies, lbConfigs, lbVersio
 
   updateBadge(results);
   return { type: 'AUDIT_RESULTS', data: results };
+}
+
+async function savePolicyOverride(namespace, policies) {
+  const { policyOverrides = {} } = await chrome.storage.local.get('policyOverrides');
+  policyOverrides[namespace] = policies;
+  await chrome.storage.local.set({ policyOverrides });
+  return { ok: true };
+}
+
+async function clearPolicyOverride(namespace) {
+  const { policyOverrides = {} } = await chrome.storage.local.get('policyOverrides');
+  delete policyOverrides[namespace];
+  await chrome.storage.local.set({ policyOverrides });
+  return { ok: true };
 }
 
 function updateBadge(results) {

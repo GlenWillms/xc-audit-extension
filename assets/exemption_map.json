@@ -1,7 +1,7 @@
 {
   "ignore-apid": {
     "label": "API Discovery",
-    "keys": ["disable_api_discovery"],
+    "keys": ["enable_api_discovery"],
     "category": "API Security"
   },
   "ignore-apip": {

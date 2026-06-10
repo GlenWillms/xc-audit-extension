@@ -107,6 +107,42 @@ body {
 
 .btn-secondary:hover { background: #dee2e6; }
 
+.btn-sm { padding: 4px 8px; font-size: 11px; }
+
+.btn-set-baseline {
+  margin-top: 6px;
+  background: #e9ecef;
+  color: #333;
+  width: 100%;
+}
+
+.btn-set-baseline:hover { background: #dee2e6; }
+
+.btn-set-baseline-done {
+  margin-top: 6px;
+  background: #d4edda;
+  color: #155724;
+  width: 100%;
+  cursor: default;
+}
+
+.policy-btn-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.policy-btn-row .btn { flex: 1; }
+
+.policy-override-note {
+  font-size: 10px;
+  color: #856404;
+  background: #fff3cd;
+  padding: 3px 6px;
+  border-radius: 3px;
+  margin-top: 4px;
+}
+
 .lb-detail {
   margin-top: 4px;
   border-radius: 4px;
