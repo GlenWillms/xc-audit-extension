@@ -1,4 +1,4 @@
-import { runFullAudit } from '../lib/audit-engine.js';
+import { runFullAudit, groupByCategory } from '../lib/audit-engine.js';
 
 const tabData = {};
 
@@ -55,7 +55,16 @@ chrome.commands.onCommand.addListener((command) => {
   if (command === 'reload-extension') chrome.runtime.reload();
 });
 
+let checkCategories = [];
+
+async function loadCategories() {
+  const resp = await fetch(chrome.runtime.getURL('assets/check-categories.json'));
+  checkCategories = await resp.json();
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
+  await loadCategories();
+
   const existing = await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'settings']);
 
   const [baselineResp, explanationsResp, exemptionResp] = await Promise.all([
@@ -71,13 +80,32 @@ chrome.runtime.onInstalled.addListener(async () => {
   };
 
   const toSet = {};
-  if (!existing.baseline) toSet.baseline = defaults.baseline;
+  if (!existing.baseline) {
+    toSet.baseline = defaults.baseline;
+  } else {
+    const merged = { ...existing.baseline };
+    const defaultInspectors = defaults.baseline.inspector_baselines || {};
+    const existingInspectors = merged.inspector_baselines || {};
+    let changed = false;
+    for (const [key, val] of Object.entries(defaultInspectors)) {
+      if (!(key in existingInspectors)) {
+        existingInspectors[key] = val;
+        changed = true;
+      }
+    }
+    if (changed) {
+      merged.inspector_baselines = existingInspectors;
+      toSet.baseline = merged;
+    }
+  }
   if (!existing.explanations) toSet.explanations = defaults.explanations;
   if (!existing.exemptionMap) toSet.exemptionMap = defaults.exemptionMap;
   if (!existing.settings) toSet.settings = { autoAudit: true };
 
   if (Object.keys(toSet).length) await chrome.storage.local.set(toSet);
 });
+
+loadCategories();
 
 // --- Hashing for version-based cache ---
 
@@ -161,7 +189,7 @@ async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersion
   return { stale, fresh };
 }
 
-async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions }, forceRefresh) {
+async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects }, forceRefresh) {
   const { baseline, explanations, exemptionMap, policyOverrides } =
     await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'policyOverrides']);
 
@@ -182,8 +210,21 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
     policies,
     effectiveBaseline,
     explanations || {},
-    exemptionMap || {}
+    exemptionMap || {},
+    referencedObjects || {}
   );
+
+  if (checkCategories.length) {
+    const optionalKeys = new Set(
+      checkCategories.flatMap((cat) => cat.checks.filter((c) => c.required === false).map((c) => c.key))
+    );
+    for (const lbResult of results.loadBalancers) {
+      lbResult.categorized = groupByCategory(lbResult, checkCategories);
+      const requiredDiffs = lbResult.diffs.filter((d) => !optionalKeys.has(d.path.split('.')[1]));
+      const requiredInspections = (lbResult.inspections || []).filter((i) => !optionalKeys.has(i.categoryId));
+      lbResult.pass = requiredDiffs.length === 0 && requiredInspections.every((i) => i.pass);
+    }
+  }
 
   const currentHash = await hashJson({ baseline, exemptionMap });
   const cacheKey = buildCacheKey(tenant, namespace, managedTenant);

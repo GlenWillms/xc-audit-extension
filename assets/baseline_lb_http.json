@@ -2,7 +2,15 @@
   "namespace_baseline": {},
   "lb_baseline": {
     "spec": {
-      "__ONE_OF__tls_hsts": [
+      "__ONE_OF__tls": [
+            {
+              "https_auto_cert": {}
+            },
+            {
+              "https": {}
+            }
+          ],
+      "__ONE_OF__hsts": [
             {
               "https_auto_cert": { "add_hsts": true }
             },
@@ -27,8 +35,20 @@
       "default_sensitive_data_policy": {},
       "disable_api_testing": {},
       "disable_api_definition": {},
-      "disable_ip_reputation": {},
-      "disable_client_side_defense": {}
+      "disable_client_side_defense": {},
+      "__inspector__geo_policy": {},
+      "__inspector__ip_reputation": {}
+    }
+  },
+  "inspector_baselines": {
+    "appFirewall": {
+      "spec": {}
+    },
+    "geoPolicy": {
+      "blocked_countries": ["COUNTRY_RU", "COUNTRY_IR", "COUNTRY_KP"]
+    },
+    "ipReputation": {
+      "min_categories": 10
     }
   }
 }

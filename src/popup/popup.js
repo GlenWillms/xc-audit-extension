@@ -197,48 +197,146 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const skipCount = lb.skipped?.length || 0;
       const passCount = lb.passed?.length || 0;
-      const failCount = lb.diffs.length;
+      const recommendedCount = lb.diffs.filter((d) => d.required === false).length;
+      const requiredFailCount = lb.diffs.filter((d) => d.required !== false).length +
+        (lb.inspections || []).filter((i) => !i.pass).length;
       const summary = document.createElement('summary');
       const parts = [];
       if (passCount) parts.push(`${passCount} passed`);
-      if (failCount) parts.push(`${failCount} failed`);
+      if (requiredFailCount) parts.push(`${requiredFailCount} failed`);
+      if (recommendedCount) parts.push(`${recommendedCount} recommended`);
       if (skipCount) parts.push(`${skipCount} skipped`);
       summary.textContent = `${lb.pass ? '✓' : '✗'} ${lb.name} (${parts.join(', ')})`;
       lbEl.appendChild(summary);
 
-      const list = document.createElement('ul');
-      list.className = 'diff-list';
-      for (const d of lb.diffs) {
-        const li = document.createElement('li');
-        li.className = 'diff-item diff-fail';
-        let text = d.path;
-        if (d.type === 'MISSING') {
-          text += ' — missing';
-        } else {
-          text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
+      if (lb.categorized?.length) {
+        for (const cat of lb.categorized) {
+          const catSection = document.createElement('div');
+          catSection.className = 'popup-category';
+
+          const catHeader = document.createElement('div');
+          catHeader.className = 'popup-category-header';
+          catHeader.textContent = cat.label;
+          catSection.appendChild(catHeader);
+
+          const list = document.createElement('ul');
+          list.className = 'diff-list';
+
+          for (const d of cat.failed) {
+            const check = cat.checks?.find((c) => d.path.split('.')[1] === c.key);
+            const displayName = check?.label || d.path;
+            const isOptional = d.required === false;
+            const li = document.createElement('li');
+            li.className = `diff-item ${isOptional ? 'diff-recommended' : 'diff-fail'}`;
+            if (check?.description) li.dataset.tooltip = check.description;
+            let text = isOptional ? `${displayName} — recommended` : displayName;
+            if (d.type === 'MISSING') {
+              text += isOptional ? '' : ' — missing';
+            } else {
+              text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
+            }
+            li.textContent = text;
+            if (d.explanation) {
+              const reason = document.createElement('div');
+              reason.className = 'diff-reason';
+              reason.textContent = d.explanation.reason;
+              li.appendChild(reason);
+            }
+            list.appendChild(li);
+          }
+
+          for (const insp of cat.inspections || []) {
+            const inspCheck = cat.checks?.find((c) => c.inspector === insp.inspector);
+            const inspLabel = inspCheck?.label || insp.refName;
+            if (insp.pass) {
+              const li = document.createElement('li');
+              li.className = 'diff-item diff-pass';
+              if (inspCheck?.description) li.dataset.tooltip = inspCheck.description;
+              li.textContent = inspLabel;
+              list.appendChild(li);
+            } else {
+              for (const d of insp.diffs) {
+                const li = document.createElement('li');
+                li.className = 'diff-item diff-fail';
+                if (inspCheck?.description) li.dataset.tooltip = inspCheck.description;
+                li.textContent = inspLabel;
+                if (d.type !== 'MISSING') {
+                  li.textContent += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
+                } else {
+                  li.textContent += ' — missing';
+                }
+                if (d.explanation) {
+                  const reason = document.createElement('div');
+                  reason.className = 'diff-reason';
+                  reason.textContent = d.explanation.reason;
+                  li.appendChild(reason);
+                }
+                list.appendChild(li);
+              }
+            }
+          }
+
+          if (cat.skipped.length) {
+            for (const s of cat.skipped) {
+              const check = cat.checks?.find((c) => c.key === s.key);
+              const label = check?.label || s.label;
+              const li = document.createElement('li');
+              li.className = 'diff-item diff-skip';
+              if (check?.description) li.dataset.tooltip = check.description;
+              li.textContent = `${label} — Ignored by Label`;
+              list.appendChild(li);
+            }
+          }
+
+          if (cat.passed.length) {
+            for (const p of cat.passed) {
+              const check = cat.checks?.find((c) => c.key === p.key);
+              const li = document.createElement('li');
+              li.className = 'diff-item diff-pass';
+              if (check?.description) li.dataset.tooltip = check.description;
+              li.textContent = check?.label || p.key;
+              list.appendChild(li);
+            }
+          }
+
+          catSection.appendChild(list);
+          lbEl.appendChild(catSection);
         }
-        li.textContent = text;
-        if (d.explanation) {
-          const reason = document.createElement('div');
-          reason.className = 'diff-reason';
-          reason.textContent = d.explanation.reason;
-          li.appendChild(reason);
+      } else {
+        const list = document.createElement('ul');
+        list.className = 'diff-list';
+        for (const d of lb.diffs) {
+          const li = document.createElement('li');
+          li.className = 'diff-item diff-fail';
+          let text = d.path;
+          if (d.type === 'MISSING') {
+            text += ' — missing';
+          } else {
+            text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
+          }
+          li.textContent = text;
+          if (d.explanation) {
+            const reason = document.createElement('div');
+            reason.className = 'diff-reason';
+            reason.textContent = d.explanation.reason;
+            li.appendChild(reason);
+          }
+          list.appendChild(li);
         }
-        list.appendChild(li);
+        if (skipCount) {
+          const skipLi = document.createElement('li');
+          skipLi.className = 'diff-item diff-skip';
+          skipLi.textContent = `${lb.skipped.map((s) => s.label).join(', ')} — Ignored by Label`;
+          list.appendChild(skipLi);
+        }
+        if (passCount) {
+          const passLi = document.createElement('li');
+          passLi.className = 'diff-item diff-pass';
+          passLi.textContent = `Passed: ${lb.passed.map((p) => p.key).join(', ')}`;
+          list.appendChild(passLi);
+        }
+        lbEl.appendChild(list);
       }
-      if (skipCount) {
-        const skipLi = document.createElement('li');
-        skipLi.className = 'diff-item diff-skip';
-        skipLi.textContent = `Skipped: ${lb.skipped.map((s) => `${s.label} (${s.labelKey}=true)`).join(', ')}`;
-        list.appendChild(skipLi);
-      }
-      if (passCount) {
-        const passLi = document.createElement('li');
-        passLi.className = 'diff-item diff-pass';
-        passLi.textContent = `Passed: ${lb.passed.map((p) => p.key).join(', ')}`;
-        list.appendChild(passLi);
-      }
-      lbEl.appendChild(list);
 
       detailsEl.appendChild(lbEl);
     }

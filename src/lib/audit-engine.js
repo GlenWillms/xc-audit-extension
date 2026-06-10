@@ -138,8 +138,167 @@ export function applyExemptions(baselineSpec, lbLabels, exemptionMap) {
   return { spec: filtered, skipped };
 }
 
-export function runFullAudit(lbConfigs, policyConfig, baseline, explanations, exemptionMap) {
+function extractGeoCountries(policyObject) {
+  const countries = new Set();
+  const spec = policyObject?.spec;
+  if (!spec) return countries;
+
+  const denyList = spec.deny_list?.country_list || [];
+  for (const code of denyList) countries.add(code);
+
+  // Walk the full spec for country_list arrays in other locations
+  function walk(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    if (Array.isArray(obj)) { obj.forEach(walk); return; }
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === 'country_list' && Array.isArray(v)) {
+        v.forEach((c) => countries.add(c));
+      } else {
+        walk(v);
+      }
+    }
+  }
+  walk(spec);
+
+  return countries;
+}
+
+function extractIpThreatCategories(policyObject) {
+  const categories = new Set();
+  const spec = policyObject?.spec;
+  if (!spec) return categories;
+
+  function walk(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    if (Array.isArray(obj)) { obj.forEach(walk); return; }
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === 'ip_threat_categories' && Array.isArray(v)) {
+        v.forEach((c) => categories.add(c));
+      } else {
+        walk(v);
+      }
+    }
+  }
+  walk(spec);
+
+  return categories;
+}
+
+function collectApplicablePolicies(lb, namespace, policyConfig, referencedObjects) {
+  const policies = [];
+  const seen = new Set();
+
+  // LB with active_service_policies uses only those; otherwise fall back to namespace policies
+  const lbPolicies = lb.spec?.active_service_policies?.policies;
+  const policyList = lbPolicies || (lb.spec?.service_policies_from_namespace !== undefined
+    ? (policyConfig?.service_policies || [])
+    : []);
+
+  for (const sp of policyList) {
+    if (!sp?.name) continue;
+    const ns = sp.namespace || namespace;
+    const key = `${ns}/${sp.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const spObject = referencedObjects.servicePolicy?.[key];
+    if (spObject) policies.push({ name: sp.name, key, object: spObject });
+  }
+
+  return policies;
+}
+
+function runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaselines, explanations, policyConfig) {
+  const inspections = [];
+  if (!referencedObjects || !inspectorBaselines) return inspections;
+
+  // App Firewall inspection
+  const fwRef = lb.spec?.app_firewall;
+  const fwBaseline = inspectorBaselines.appFirewall;
+  if (fwRef?.name && fwBaseline && Object.keys(fwBaseline.spec || {}).length > 0) {
+    const ns = fwRef.namespace || namespace;
+    const key = `${ns}/${fwRef.name}`;
+    const fwObject = referencedObjects.appFirewall?.[key];
+    if (fwObject) {
+      const diffs = findDiffs(fwObject.spec || fwObject, fwBaseline.spec, 'appfw.spec');
+      inspections.push({
+        inspector: 'appFirewall',
+        categoryId: 'waf',
+        refName: fwRef.name,
+        pass: diffs.length === 0,
+        diffs: enrichDiffs(diffs, explanations),
+      });
+    }
+  }
+
+  // Collect service policies applicable to this LB
+  const applicablePolicies = collectApplicablePolicies(lb, namespace, policyConfig, referencedObjects);
+  const policyNames = applicablePolicies.map((p) => p.name);
+
+  // Geo policy inspection
+  const geoBaseline = inspectorBaselines.geoPolicy;
+  const requiredCountries = geoBaseline?.blocked_countries || [];
+  if (requiredCountries.length > 0) {
+    const allBlockedCountries = new Set();
+    for (const p of applicablePolicies) {
+      for (const c of extractGeoCountries(p.object)) allBlockedCountries.add(c);
+    }
+
+    const missing = requiredCountries.filter((c) => !allBlockedCountries.has(c));
+    const diffs = missing.length > 0
+      ? [{
+          path: 'geo.blocked_countries',
+          type: 'VALUE_MISMATCH',
+          expected: requiredCountries.join(', '),
+          found: missing.length === requiredCountries.length
+            ? 'No geo-blocking rules found'
+            : `Missing: ${missing.join(', ')}`,
+        }]
+      : [];
+
+    inspections.push({
+      inspector: 'geoPolicy',
+      categoryId: 'transport',
+      refName: policyNames.length ? policyNames.join(', ') : 'Service Policies',
+      pass: diffs.length === 0,
+      diffs: enrichDiffs(diffs, explanations),
+    });
+  }
+
+  // IP Reputation inspection
+  const ipRepBaseline = inspectorBaselines.ipReputation;
+  const minCategories = ipRepBaseline?.min_categories ?? 10;
+  if (minCategories > 0) {
+    const allCategories = new Set();
+    for (const p of applicablePolicies) {
+      for (const c of extractIpThreatCategories(p.object)) allCategories.add(c);
+    }
+
+    const diffs = allCategories.size < minCategories
+      ? [{
+          path: 'iprep.categories',
+          type: 'VALUE_MISMATCH',
+          expected: `${minCategories}+ threat categories`,
+          found: allCategories.size === 0
+            ? 'No IP threat intelligence rules found'
+            : `${allCategories.size} categories found`,
+        }]
+      : [];
+
+    inspections.push({
+      inspector: 'ipReputation',
+      categoryId: 'transport',
+      refName: policyNames.length ? policyNames.join(', ') : 'Service Policies',
+      pass: diffs.length === 0,
+      diffs: enrichDiffs(diffs, explanations),
+    });
+  }
+
+  return inspections;
+}
+
+export function runFullAudit(lbConfigs, policyConfig, baseline, explanations, exemptionMap, referencedObjects) {
   const results = { policies: null, loadBalancers: [] };
+  const inspectorBaselines = baseline.inspector_baselines || {};
 
   if (baseline.namespace_baseline && policyConfig) {
     const diffs = findDiffs(policyConfig, baseline.namespace_baseline, 'root');
@@ -155,21 +314,78 @@ export function runFullAudit(lbConfigs, policyConfig, baseline, explanations, ex
     for (const lb of lbConfigs) {
       const labels = lb.metadata?.labels || lb.labels || {};
       const { spec: filteredSpec, skipped } = applyExemptions(lbBaseSpec, labels, exemptionMap);
+      const diffSpec = {};
+      for (const [k, v] of Object.entries(filteredSpec)) {
+        if (!k.startsWith('__inspector__')) diffSpec[k] = v;
+      }
       const currentSpec = lb.spec || {};
-      const diffs = findDiffs(currentSpec, filteredSpec, 'spec');
+      const diffs = findDiffs(currentSpec, diffSpec, 'spec');
+
+      const skippedKeys = new Set(skipped.map((s) => s.key));
+      const namespace = lb.metadata?.namespace || lb.namespace;
+      const allInspections = runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaselines, explanations, policyConfig);
+      const inspections = allInspections.filter((i) => {
+        if (i.inspector === 'appFirewall' && skippedKeys.has('app_firewall')) return false;
+        if (i.inspector === 'geoPolicy' && skippedKeys.has('__inspector__geo_policy')) return false;
+        if (i.inspector === 'ipReputation' && skippedKeys.has('__inspector__ip_reputation')) return false;
+        return true;
+      });
+
       const failedKeys = new Set(diffs.map((d) => d.path.split('.')[1]));
-      const passed = Object.keys(filteredSpec)
+      const passed = Object.keys(diffSpec)
         .filter((k) => !failedKeys.has(k))
         .map((k) => ({ key: k, path: `spec.${k}` }));
+
       results.loadBalancers.push({
         name: lb.metadata?.name || lb.name,
-        pass: diffs.length === 0,
+        pass: diffs.length === 0 && inspections.every((i) => i.pass),
         diffs: enrichDiffs(diffs, explanations),
         skipped,
         passed,
+        inspections,
       });
     }
   }
 
   return results;
+}
+
+export function groupByCategory(lbResult, categories) {
+  const grouped = categories.map((cat) => ({
+    id: cat.id,
+    label: cat.label,
+    checks: cat.checks,
+    passed: [],
+    failed: [],
+    skipped: [],
+    inspections: [],
+  }));
+
+  for (const diff of lbResult.diffs) {
+    const topKey = diff.path.split('.')[1];
+    const cat = grouped.find((g) => g.checks.some((c) => c.key === topKey));
+    if (cat) {
+      const check = cat.checks.find((c) => c.key === topKey);
+      cat.failed.push({ ...diff, required: check?.required !== false });
+    }
+  }
+
+  for (const p of lbResult.passed || []) {
+    const cat = grouped.find((g) => g.checks.some((c) => c.key === p.key));
+    if (cat) cat.passed.push(p);
+  }
+
+  for (const s of lbResult.skipped || []) {
+    const cat = grouped.find((g) => g.checks.some((c) => c.key === s.key));
+    if (cat) cat.skipped.push(s);
+  }
+
+  for (const insp of lbResult.inspections || []) {
+    const cat = grouped.find((g) => g.id === insp.categoryId);
+    if (cat) cat.inspections.push(insp);
+  }
+
+  return grouped.filter(
+    (g) => g.passed.length || g.failed.length || g.skipped.length || g.inspections.length
+  );
 }
