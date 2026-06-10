@@ -27,6 +27,10 @@
         "reason": "The load balancer is not advertising on the public default VIP as per baseline.",
         "next_step": "Enable 'Advertise on Public Default VIP' to comply with baseline."
     },
+    "iprep.categories": {
+        "reason": "IP threat intelligence coverage is insufficient in the applied service policies.",
+        "next_step": "Ensure a service policy with at least 10 IP threat categories is applied."
+    },
     "geo.blocked_countries": {
         "reason": "Required geo-blocking countries are not all present in the applied service policies.",
         "next_step": "Ensure a service policy with a deny list blocks Russia (COUNTRY_RU), Iran (COUNTRY_IR), and North Korea (COUNTRY_KP)."

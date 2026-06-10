@@ -163,6 +163,50 @@ function extractGeoCountries(policyObject) {
   return countries;
 }
 
+function extractIpThreatCategories(policyObject) {
+  const categories = new Set();
+  const spec = policyObject?.spec;
+  if (!spec) return categories;
+
+  function walk(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    if (Array.isArray(obj)) { obj.forEach(walk); return; }
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === 'ip_threat_categories' && Array.isArray(v)) {
+        v.forEach((c) => categories.add(c));
+      } else {
+        walk(v);
+      }
+    }
+  }
+  walk(spec);
+
+  return categories;
+}
+
+function collectApplicablePolicies(lb, namespace, policyConfig, referencedObjects) {
+  const policies = [];
+  const seen = new Set();
+
+  // LB with active_service_policies uses only those; otherwise fall back to namespace policies
+  const lbPolicies = lb.spec?.active_service_policies?.policies;
+  const policyList = lbPolicies || (lb.spec?.service_policies_from_namespace !== undefined
+    ? (policyConfig?.service_policies || [])
+    : []);
+
+  for (const sp of policyList) {
+    if (!sp?.name) continue;
+    const ns = sp.namespace || namespace;
+    const key = `${ns}/${sp.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const spObject = referencedObjects.servicePolicy?.[key];
+    if (spObject) policies.push({ name: sp.name, key, object: spObject });
+  }
+
+  return policies;
+}
+
 function runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaselines, explanations, policyConfig) {
   const inspections = [];
   if (!referencedObjects || !inspectorBaselines) return inspections;
@@ -186,30 +230,17 @@ function runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaseline
     }
   }
 
+  // Collect service policies applicable to this LB
+  const applicablePolicies = collectApplicablePolicies(lb, namespace, policyConfig, referencedObjects);
+  const policyNames = applicablePolicies.map((p) => p.name);
+
   // Geo policy inspection
   const geoBaseline = inspectorBaselines.geoPolicy;
   const requiredCountries = geoBaseline?.blocked_countries || [];
-  if (requiredCountries.length > 0 && referencedObjects.servicePolicy) {
+  if (requiredCountries.length > 0) {
     const allBlockedCountries = new Set();
-    const policyNames = [];
-    const seen = new Set();
-
-    // Check LB-level service policies first, then namespace-level
-    const lbPolicies = lb.spec?.active_service_policies?.policies || [];
-    const nsPolicies = policyConfig?.service_policies || [];
-    const allPolicies = [...lbPolicies, ...nsPolicies];
-
-    for (const sp of allPolicies) {
-      if (!sp?.name) continue;
-      const ns = sp.namespace || namespace;
-      const key = `${ns}/${sp.name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const spObject = referencedObjects.servicePolicy[key];
-      if (spObject) {
-        policyNames.push(sp.name);
-        for (const c of extractGeoCountries(spObject)) allBlockedCountries.add(c);
-      }
+    for (const p of applicablePolicies) {
+      for (const c of extractGeoCountries(p.object)) allBlockedCountries.add(c);
     }
 
     const missing = requiredCountries.filter((c) => !allBlockedCountries.has(c));
@@ -226,6 +257,35 @@ function runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaseline
 
     inspections.push({
       inspector: 'geoPolicy',
+      categoryId: 'transport',
+      refName: policyNames.length ? policyNames.join(', ') : 'Service Policies',
+      pass: diffs.length === 0,
+      diffs: enrichDiffs(diffs, explanations),
+    });
+  }
+
+  // IP Reputation inspection
+  const ipRepBaseline = inspectorBaselines.ipReputation;
+  const minCategories = ipRepBaseline?.min_categories ?? 10;
+  if (minCategories > 0) {
+    const allCategories = new Set();
+    for (const p of applicablePolicies) {
+      for (const c of extractIpThreatCategories(p.object)) allCategories.add(c);
+    }
+
+    const diffs = allCategories.size < minCategories
+      ? [{
+          path: 'iprep.categories',
+          type: 'VALUE_MISMATCH',
+          expected: `${minCategories}+ threat categories`,
+          found: allCategories.size === 0
+            ? 'No IP threat intelligence rules found'
+            : `${allCategories.size} categories found`,
+        }]
+      : [];
+
+    inspections.push({
+      inspector: 'ipReputation',
       categoryId: 'transport',
       refName: policyNames.length ? policyNames.join(', ') : 'Service Policies',
       pass: diffs.length === 0,
@@ -267,6 +327,7 @@ export function runFullAudit(lbConfigs, policyConfig, baseline, explanations, ex
       const inspections = allInspections.filter((i) => {
         if (i.inspector === 'appFirewall' && skippedKeys.has('app_firewall')) return false;
         if (i.inspector === 'geoPolicy' && skippedKeys.has('__inspector__geo_policy')) return false;
+        if (i.inspector === 'ipReputation' && skippedKeys.has('__inspector__ip_reputation')) return false;
         return true;
       });
 

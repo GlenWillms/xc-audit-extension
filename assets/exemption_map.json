@@ -11,7 +11,7 @@
   },
   "ignore-iprep": {
     "label": "IP Reputation",
-    "keys": ["disable_ip_reputation"],
+    "keys": ["__inspector__ip_reputation"],
     "category": "Core Security (Transport)"
   },
   "ignore-trustip": {

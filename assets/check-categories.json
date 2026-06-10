@@ -16,10 +16,11 @@
         "code": "ignore-hsts"
       },
       {
-        "key": "disable_ip_reputation",
+        "key": "__inspector__ip_reputation",
         "label": "IP Reputation",
-        "description": "IP Reputation filtering must be enabled to block traffic from known malicious sources.",
-        "code": "ignore-iprep"
+        "description": "A service policy with IP threat intelligence categories must be applied to block traffic from known malicious sources.",
+        "code": "ignore-iprep",
+        "inspector": "ipReputation"
       },
       {
         "key": "disable_trust_client_ip_headers",

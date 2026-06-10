@@ -80,7 +80,24 @@ chrome.runtime.onInstalled.addListener(async () => {
   };
 
   const toSet = {};
-  if (!existing.baseline) toSet.baseline = defaults.baseline;
+  if (!existing.baseline) {
+    toSet.baseline = defaults.baseline;
+  } else {
+    const merged = { ...existing.baseline };
+    const defaultInspectors = defaults.baseline.inspector_baselines || {};
+    const existingInspectors = merged.inspector_baselines || {};
+    let changed = false;
+    for (const [key, val] of Object.entries(defaultInspectors)) {
+      if (!(key in existingInspectors)) {
+        existingInspectors[key] = val;
+        changed = true;
+      }
+    }
+    if (changed) {
+      merged.inspector_baselines = existingInspectors;
+      toSet.baseline = merged;
+    }
+  }
   if (!existing.explanations) toSet.explanations = defaults.explanations;
   if (!existing.exemptionMap) toSet.exemptionMap = defaults.exemptionMap;
   if (!existing.settings) toSet.settings = { autoAudit: true };
