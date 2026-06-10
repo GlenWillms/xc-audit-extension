@@ -1,22 +1,20 @@
 const $ = (id) => document.getElementById(id);
 
-const CHECK_REGISTRY = [
-  { category: 'TLS & Encryption', key: '__ONE_OF__tls_hsts', label: 'TLS / HSTS', code: 'ignore-tls' },
-  { category: 'Web Application Firewall', key: 'app_firewall', label: 'App Firewall', code: 'ignore-waf' },
-  { category: 'DDoS Protection', key: 'ddos_mitigation_rules', label: 'DDoS Mitigation Rules', code: 'ignore-ddos' },
-  { category: 'DDoS Protection', key: 'l7_ddos_protection', label: 'L7 DDoS Protection', code: 'ignore-ddos' },
-  { category: 'API Security', key: 'enable_api_discovery', label: 'API Discovery', code: 'ignore-apid' },
-  { category: 'API Security', key: 'disable_api_definition', label: 'API Definition', code: 'ignore-apip' },
-  { category: 'API Security', key: 'disable_api_testing', label: 'API Testing', code: 'ignore-apip' },
-  { category: 'Bot & Client Protection', key: 'disable_bot_defense', label: 'Bot Defense', code: 'ignore-bot' },
-  { category: 'Bot & Client Protection', key: 'disable_client_side_defense', label: 'Client-Side Defense', code: 'ignore-csd' },
-  { category: 'Bot & Client Protection', key: 'disable_ip_reputation', label: 'IP Reputation', code: 'ignore-iprep' },
-  { category: 'Policy & Data', key: 'service_policies_from_namespace', label: 'Service Policies (from namespace)', code: 'ignore-sp' },
-  { category: 'Policy & Data', key: 'default_sensitive_data_policy', label: 'Sensitive Data Policy', code: 'ignore-sdp' },
-  { category: 'Policy & Data', key: 'disable_trust_client_ip_headers', label: 'Trust Client IP Headers', code: 'ignore-trustip' },
-];
+let CHECK_CATEGORIES = [];
+let CHECK_REGISTRY = [];
 
-document.addEventListener('DOMContentLoaded', loadAll);
+async function loadCategories() {
+  const resp = await fetch(chrome.runtime.getURL('assets/check-categories.json'));
+  CHECK_CATEGORIES = await resp.json();
+  CHECK_REGISTRY = CHECK_CATEGORIES.flatMap((cat) =>
+    cat.checks.map((check) => ({ ...check, category: cat.label, categoryId: cat.id }))
+  );
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadCategories();
+  loadAll();
+});
 
 async function loadAll() {
   const { baseline, explanations, exemptionMap, settings } =
@@ -39,22 +37,16 @@ function renderChecks(baseline) {
   const container = $('checksContainer');
   container.innerHTML = '';
 
-  const categories = {};
-  for (const check of CHECK_REGISTRY) {
-    if (!categories[check.category]) categories[check.category] = [];
-    categories[check.category].push(check);
-  }
-
-  for (const [cat, checks] of Object.entries(categories)) {
+  for (const cat of CHECK_CATEGORIES) {
     const group = document.createElement('div');
     group.className = 'check-group';
 
     const header = document.createElement('div');
     header.className = 'check-group-header';
-    header.textContent = cat;
+    header.textContent = cat.label;
     group.appendChild(header);
 
-    for (const check of checks) {
+    for (const check of cat.checks) {
       const row = document.createElement('label');
       row.className = 'check-row';
 

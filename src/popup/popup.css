@@ -186,3 +186,59 @@ body {
   margin-top: 2px;
   font-style: italic;
 }
+
+[data-tooltip] {
+  position: relative;
+  cursor: help;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: max-content;
+  max-width: 340px;
+  max-height: calc(6 * 1.4em);
+  overflow: hidden;
+  padding: 5px 8px;
+  background: #1a1a1a;
+  color: #f0f0f0;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.4;
+  border-radius: 4px;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 100;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
+.diff-recommended {
+  color: #0d6efd;
+  font-style: italic;
+}
+
+.popup-category {
+  margin-bottom: 6px;
+}
+
+.popup-category:last-child {
+  margin-bottom: 0;
+}
+
+.popup-category-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #495057;
+  padding: 4px 8px 2px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+}

@@ -118,10 +118,12 @@
         )
       ).filter(Boolean);
 
+      const referencedObjects = await fetchReferencedObjects(lbConfigs, namespace, apiUrl, policies, defaultPolicies);
+
       chrome.runtime.sendMessage(
         {
           type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT',
-          tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions,
+          tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects,
         },
         (response) => {
           if (chrome.runtime.lastError) return;
@@ -142,6 +144,70 @@
         showSessionBanner();
       }
     }
+  }
+
+  async function fetchReferencedObjects(lbConfigs, namespace, apiUrl, policies, defaultPolicies) {
+    const refs = { appFirewall: {}, servicePolicy: {} };
+    const fwSeen = new Map();
+    const spSeen = new Map();
+
+    for (const lb of lbConfigs) {
+      const fw = lb.spec?.app_firewall;
+      if (fw?.name) {
+        const ns = fw.namespace || namespace;
+        const key = `${ns}/${fw.name}`;
+        if (!fwSeen.has(key)) fwSeen.set(key, { name: fw.name, namespace: ns });
+      }
+    }
+
+    const nsPolicies = policies?.service_policies || defaultPolicies?.service_policies || [];
+    for (const sp of nsPolicies) {
+      if (sp?.name) {
+        const ns = sp.namespace || namespace;
+        const key = `${ns}/${sp.name}`;
+        if (!spSeen.has(key)) spSeen.set(key, { name: sp.name, namespace: ns });
+      }
+    }
+
+    for (const lb of lbConfigs) {
+      const lbPolicies = lb.spec?.active_service_policies?.policies || [];
+      for (const sp of lbPolicies) {
+        if (sp?.name) {
+          const ns = sp.namespace || namespace;
+          const key = `${ns}/${sp.name}`;
+          if (!spSeen.has(key)) spSeen.set(key, { name: sp.name, namespace: ns });
+        }
+      }
+    }
+
+    const fetches = [];
+
+    for (const [key, ref] of fwSeen) {
+      fetches.push((async () => {
+        try {
+          const resp = await fetch(apiUrl(`/api/config/namespaces/${ref.namespace}/app_firewalls/${ref.name}`));
+          if (resp.ok) {
+            refs.appFirewall[key] = await resp.json();
+            console.log('[XC Audit] Fetched app firewall policy:', key, refs.appFirewall[key]);
+          }
+        } catch {}
+      })());
+    }
+
+    for (const [key, ref] of spSeen) {
+      fetches.push((async () => {
+        try {
+          const resp = await fetch(apiUrl(`/api/config/namespaces/${ref.namespace}/service_policys/${ref.name}`));
+          if (resp.ok) {
+            refs.servicePolicy[key] = await resp.json();
+            console.log('[XC Audit] Fetched service policy:', key, refs.servicePolicy[key]);
+          }
+        } catch {}
+      })());
+    }
+
+    await Promise.all(fetches);
+    return refs;
   }
 
   function observeAndInject() {
@@ -174,50 +240,114 @@
     return String(val);
   }
 
+  function resolveCheck(checks, path) {
+    const topKey = path.split('.')[1];
+    return checks?.find((c) => c.key === topKey) || null;
+  }
+
+  function buildDiffHtml(d, checks) {
+    const check = resolveCheck(checks, d.path);
+    const displayName = check?.label || d.path;
+    const tooltip = check?.description || '';
+    const isOptional = d.required === false;
+    let html = `<div class="xc-audit-issue${isOptional ? ' xc-audit-issue-optional' : ''}">`;
+    if (isOptional) {
+      html += `<span class="xc-audit-recommended-tag">Recommended</span>`;
+    }
+    html += `<div class="xc-audit-issue-path"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(displayName)}</div>`;
+    if (d.type === 'MISSING') {
+      html += `<div class="xc-audit-issue-detail">Configuration is <strong>missing</strong></div>`;
+    } else {
+      html += `<div class="xc-audit-issue-detail">Expected: <code>${escapeHtml(fmt(d.expected))}</code></div>`;
+      html += `<div class="xc-audit-issue-detail">Found: <code>${escapeHtml(fmt(d.found))}</code></div>`;
+    }
+    if (d.explanation) {
+      html += `<div class="xc-audit-reason">${escapeHtml(d.explanation.reason)}</div>`;
+      if (d.explanation.next_step) {
+        html += `<div class="xc-audit-fix">${escapeHtml(d.explanation.next_step)}</div>`;
+      }
+    }
+    html += `</div>`;
+    return html;
+  }
+
   function buildDetailRow(result) {
     const row = document.createElement('div');
     row.className = 'xc-audit-detail-row';
     let html = '';
 
-    if (result.diffs.length) {
-      html += `<div class="xc-audit-section xc-audit-section-fail">`;
-      html += `<div class="xc-audit-section-header">Failed (${result.diffs.length})</div>`;
-      for (const d of result.diffs) {
-        html += `<div class="xc-audit-issue">`;
-        html += `<div class="xc-audit-issue-path">${escapeHtml(d.path)}</div>`;
-        if (d.type === 'MISSING') {
-          html += `<div class="xc-audit-issue-detail">Configuration is <strong>missing</strong></div>`;
-        } else {
-          html += `<div class="xc-audit-issue-detail">Expected: <code>${escapeHtml(fmt(d.expected))}</code></div>`;
-          html += `<div class="xc-audit-issue-detail">Found: <code>${escapeHtml(fmt(d.found))}</code></div>`;
-        }
-        if (d.explanation) {
-          html += `<div class="xc-audit-reason">${escapeHtml(d.explanation.reason)}</div>`;
-          if (d.explanation.next_step) {
-            html += `<div class="xc-audit-fix">${escapeHtml(d.explanation.next_step)}</div>`;
+    if (result.categorized?.length) {
+      for (const cat of result.categorized) {
+        html += `<div class="xc-audit-category">`;
+        html += `<div class="xc-audit-category-header">${escapeHtml(cat.label)}</div>`;
+
+        if (cat.failed.length) {
+          for (const d of cat.failed) {
+            html += buildDiffHtml(d, cat.checks);
           }
+        }
+
+        if (cat.inspections?.length) {
+          for (const insp of cat.inspections) {
+            const inspCheck = cat.checks?.find((c) => c.inspector === insp.inspector);
+            const inspLabel = inspCheck?.label || insp.refName;
+            const inspTooltip = inspCheck?.description || '';
+            if (insp.pass) {
+              html += `<span class="xc-audit-passed-tag"${inspTooltip ? ` data-tooltip="${escapeHtml(inspTooltip)}"` : ''}>${escapeHtml(inspLabel)}</span>`;
+            } else {
+              html += `<div class="xc-audit-inspection">`;
+              html += `<div class="xc-audit-inspection-header"${inspTooltip ? ` data-tooltip="${escapeHtml(inspTooltip)}"` : ''}>${escapeHtml(inspLabel)} (${insp.diffs.length} issue${insp.diffs.length === 1 ? '' : 's'})</div>`;
+              for (const d of insp.diffs) {
+                html += buildDiffHtml(d, null);
+              }
+              html += `</div>`;
+            }
+          }
+        }
+
+        if (cat.skipped.length) {
+          for (const s of cat.skipped) {
+            const check = cat.checks?.find((c) => c.key === s.key);
+            const label = check?.label || s.label;
+            const tooltip = check?.description || '';
+            html += `<span class="xc-audit-skipped-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — Ignored by Label</span>`;
+          }
+        }
+
+        if (cat.passed.length) {
+          for (const p of cat.passed) {
+            const check = cat.checks?.find((c) => c.key === p.key);
+            const label = check?.label || p.key;
+            const tooltip = check?.description || '';
+            html += `<span class="xc-audit-passed-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)}</span>`;
+          }
+        }
+
+        html += `</div>`;
+      }
+    } else {
+      if (result.diffs.length) {
+        html += `<div class="xc-audit-section xc-audit-section-fail">`;
+        html += `<div class="xc-audit-section-header">Failed (${result.diffs.length})</div>`;
+        for (const d of result.diffs) { html += buildDiffHtml(d); }
+        html += `</div>`;
+      }
+      if (result.skipped?.length) {
+        html += `<div class="xc-audit-section xc-audit-section-skip">`;
+        html += `<div class="xc-audit-section-header">Skipped (${result.skipped.length})</div>`;
+        for (const s of result.skipped) {
+          html += `<span class="xc-audit-skipped-tag">${escapeHtml(s.label)} — Ignored by Label</span>`;
         }
         html += `</div>`;
       }
-      html += `</div>`;
-    }
-
-    if (result.skipped?.length) {
-      html += `<div class="xc-audit-section xc-audit-section-skip">`;
-      html += `<div class="xc-audit-section-header">Skipped (${result.skipped.length})</div>`;
-      for (const s of result.skipped) {
-        html += `<span class="xc-audit-skipped-tag">${escapeHtml(s.label)} <code>${escapeHtml(s.labelKey)}=true</code></span>`;
+      if (result.passed?.length) {
+        html += `<div class="xc-audit-section xc-audit-section-pass">`;
+        html += `<div class="xc-audit-section-header">Passed (${result.passed.length})</div>`;
+        for (const p of result.passed) {
+          html += `<span class="xc-audit-passed-tag">${escapeHtml(p.key)}</span>`;
+        }
+        html += `</div>`;
       }
-      html += `</div>`;
-    }
-
-    if (result.passed?.length) {
-      html += `<div class="xc-audit-section xc-audit-section-pass">`;
-      html += `<div class="xc-audit-section-header">Passed (${result.passed.length})</div>`;
-      for (const p of result.passed) {
-        html += `<span class="xc-audit-passed-tag">${escapeHtml(p.key)}</span>`;
-      }
-      html += `</div>`;
     }
 
     row.innerHTML = html;
@@ -239,13 +369,16 @@
 
       const skipCount = result.skipped?.length || 0;
       const passCount = result.passed?.length || 0;
-      const failCount = result.diffs.length;
+      const recommendedCount = result.diffs.filter((d) => d.required === false).length;
+      const requiredFailCount = result.diffs.filter((d) => d.required !== false).length +
+        (result.inspections || []).filter((i) => !i.pass).length;
       const badge = document.createElement('span');
       badge.className = `xc-audit-badge ${result.pass ? 'xc-audit-pass' : 'xc-audit-fail'}`;
 
       const parts = [];
       if (passCount) parts.push(`${passCount} passed`);
-      if (failCount) parts.push(`${failCount} failed`);
+      if (requiredFailCount) parts.push(`${requiredFailCount} failed`);
+      if (recommendedCount) parts.push(`${recommendedCount} recommended`);
       if (skipCount) parts.push(`${skipCount} skipped`);
       badge.textContent = (result.pass ? 'PASS' : 'FAIL') + (parts.length ? ` (${parts.join(', ')})` : '');
       badge.title = 'Click to toggle details';
