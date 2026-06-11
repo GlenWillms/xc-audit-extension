@@ -32,6 +32,18 @@
           .catch((err) => sendResponse({ error: err.message }));
         return true;
       }
+      if (message.type === 'LIST_NAMESPACES') {
+        listNamespaces()
+          .then(sendResponse)
+          .catch((err) => sendResponse({ error: err.message }));
+        return true;
+      }
+      if (message.type === 'AUDIT_NAMESPACE') {
+        auditNamespace(message.namespace)
+          .then(sendResponse)
+          .catch((err) => sendResponse({ error: err.message }));
+        return true;
+      }
     });
 
     const titleEl = document.querySelector('head > title') || document.head;
@@ -75,113 +87,156 @@
     return null;
   }
 
-  async function requestAudit(tenant, namespace, managedTenant, force) {
-    try {
-      currentManagedTenant = managedTenant;
-      const csrf = await getCsrf();
-      if (!csrf) return;
+  function currentTenant() {
+    const parsed = parseXcUrl(location.href);
+    return parsed ? { tenant: parsed.tenant, managedTenant: parsed.managedTenant || currentManagedTenant } : null;
+  }
 
-      const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
+  async function auditNamespace(namespace) {
+    const ctx = currentTenant();
+    if (!ctx) throw new Error('Not on an XC console page');
+    const { tenant, managedTenant } = ctx;
 
-      function apiUrl(path) {
-        return `${apiPrefix}${path}?report_fields&csrf=${csrf}`;
-      }
+    const csrf = await getCsrf();
+    if (!csrf) throw new Error('No CSRF token');
 
-      const tenantMetaKey = `tenant:${tenant}:meta`;
-      const tenantMetaCache = await chrome.storage.local.get(tenantMetaKey);
-      let tenantMeta = tenantMetaCache[tenantMetaKey] || null;
-      if (!tenantMeta) {
-        tenantMeta = await fetchTenantMeta(csrf, managedTenant);
-      }
+    const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
+    function apiUrl(path) {
+      return `${apiPrefix}${path}?report_fields&csrf=${csrf}`;
+    }
 
-      const [policies, defaultPolicies, lbListResp] = await Promise.all([
-        fetch(apiUrl(`/api/config/namespaces/${namespace}/active_service_policies`))
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
-        fetch(apiUrl(`/api/config/namespaces/default/active_service_policies`))
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
-        fetch(apiUrl(`/api/config/namespaces/${namespace}/http_loadbalancers`)),
-      ]);
+    const tenantMetaKey = `tenant:${tenant}:meta`;
+    const tenantMetaCache = await chrome.storage.local.get(tenantMetaKey);
+    let tenantMeta = tenantMetaCache[tenantMetaKey] || null;
+    if (!tenantMeta) {
+      tenantMeta = await fetchTenantMeta(csrf, managedTenant);
+    }
 
-      if (!lbListResp.ok) throw new Error(`API ${lbListResp.status}`);
-      const lbList = (await lbListResp.json()).items || [];
+    const [policies, defaultPolicies, lbListResp] = await Promise.all([
+      fetch(apiUrl(`/api/config/namespaces/${namespace}/active_service_policies`))
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch(apiUrl(`/api/config/namespaces/default/active_service_policies`))
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch(apiUrl(`/api/config/namespaces/${namespace}/http_loadbalancers`)),
+    ]);
 
-      const lbVersions = lbList.map((lb) => ({
-        name: lb.name,
-        version: lb.resource_version || lb.metadata?.resource_version || null,
-      }));
+    if (!lbListResp.ok) throw new Error(`API ${lbListResp.status}`);
+    const lbList = (await lbListResp.json()).items || [];
 
-      let staleLbs = lbVersions.map((v) => v.name);
-      let freshResults = {};
+    const lbVersions = lbList.map((lb) => ({
+      name: lb.name,
+      version: lb.resource_version || lb.metadata?.resource_version || null,
+    }));
 
-      if (!force) {
-        const check = await chrome.runtime.sendMessage({
-          type: 'CHECK_VERSIONS', tenant, namespace, managedTenant, lbVersions,
-        });
-        if (check) {
-          staleLbs = check.stale || [];
-          freshResults = check.fresh || {};
-        }
-      }
-
-      const lbConfigs = (
-        await Promise.all(
-          staleLbs.map((name) =>
-            fetch(apiUrl(`/api/config/namespaces/${namespace}/http_loadbalancers/${name}`))
-              .then((r) => (r.ok ? r.json() : null))
-              .catch(() => null)
-          )
+    const lbConfigs = (
+      await Promise.all(
+        lbVersions.map((v) =>
+          fetch(apiUrl(`/api/config/namespaces/${namespace}/http_loadbalancers/${v.name}`))
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
         )
-      ).filter(Boolean);
+      )
+    ).filter(Boolean);
 
-      const referencedObjects = await fetchReferencedObjects(lbConfigs, namespace, apiUrl, policies, defaultPolicies);
+    const referencedObjects = await fetchReferencedObjects(lbConfigs, namespace, apiUrl, policies, defaultPolicies);
 
-      const baselineLbNames = new Set();
-      for (const lb of lbConfigs) {
-        const label = (lb.metadata?.labels || lb.labels || {})['xc-audit-baseline-lb'];
-        if (label) baselineLbNames.add(label);
+    const baselineLbNames = new Set();
+    for (const lb of lbConfigs) {
+      const label = (lb.metadata?.labels || lb.labels || {})['xc-audit-baseline-lb'];
+      if (label) baselineLbNames.add(label);
+    }
+
+    const baselineLbConfigs = {};
+    let baselineLbReferencedObjects = { appFirewall: {}, servicePolicy: {} };
+    if (baselineLbNames.size > 0) {
+      await Promise.all([...baselineLbNames].map(async (name) => {
+        try {
+          const resp = await fetch(apiUrl(`/api/config/namespaces/default/http_loadbalancers/${name}`));
+          if (resp.ok) baselineLbConfigs[name] = await resp.json();
+        } catch {}
+      }));
+      const blbArray = Object.values(baselineLbConfigs);
+      if (blbArray.length > 0) {
+        baselineLbReferencedObjects = await fetchReferencedObjects(blbArray, 'default', apiUrl, defaultPolicies, null);
       }
+    }
 
-      const baselineLbConfigs = {};
-      let baselineLbReferencedObjects = { appFirewall: {}, servicePolicy: {} };
-      if (baselineLbNames.size > 0) {
-        await Promise.all([...baselineLbNames].map(async (name) => {
-          try {
-            const resp = await fetch(apiUrl(`/api/config/namespaces/default/http_loadbalancers/${name}`));
-            if (resp.ok) baselineLbConfigs[name] = await resp.json();
-          } catch {}
-        }));
-        const blbArray = Object.values(baselineLbConfigs);
-        if (blbArray.length > 0) {
-          baselineLbReferencedObjects = await fetchReferencedObjects(blbArray, 'default', apiUrl, defaultPolicies, null);
-        }
-      }
-
+    return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
-          type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT',
+          type: 'FORCE_RUN_AUDIT',
           tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects,
           baselineLbConfigs, baselineLbReferencedObjects, tenantMeta,
         },
         (response) => {
-          if (chrome.runtime.lastError) return;
-          if (response?.type === 'AUDIT_RESULTS') {
-            const data = response.data;
-            for (const [name, result] of Object.entries(freshResults)) {
-              if (!data.loadBalancers.find((lb) => lb.name === name)) {
-                data.loadBalancers.push(result);
-              }
-            }
-            auditResults = data;
-            observeAndInject();
-          }
+          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+          resolve(response);
         }
       );
+    });
+  }
+
+  async function requestAudit(tenant, namespace, managedTenant, force) {
+    try {
+      currentManagedTenant = managedTenant;
+
+      if (!force) {
+        const csrf = await getCsrf();
+        if (!csrf) return;
+        const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
+        const lbListResp = await fetch(`${apiPrefix}/api/config/namespaces/${namespace}/http_loadbalancers?report_fields&csrf=${csrf}`);
+        if (!lbListResp.ok) throw new Error(`API ${lbListResp.status}`);
+        const lbList = (await lbListResp.json()).items || [];
+        const lbVersions = lbList.map((lb) => ({
+          name: lb.name,
+          version: lb.resource_version || lb.metadata?.resource_version || null,
+        }));
+
+        const check = await chrome.runtime.sendMessage({
+          type: 'CHECK_VERSIONS', tenant, namespace, managedTenant, lbVersions,
+        });
+        if (check && check.stale.length === 0) {
+          const { auditCache } = await chrome.storage.session.get('auditCache');
+          const cacheKey = managedTenant ? `${tenant}/${managedTenant}/${namespace}` : `${tenant}/${namespace}`;
+          const cached = auditCache?.[cacheKey];
+          if (cached) {
+            const lbs = cached.loadBalancers || {};
+            auditResults = {
+              policies: cached.policies,
+              loadBalancers: Object.values(lbs).map((e) => e.result),
+            };
+            observeAndInject();
+            return;
+          }
+        }
+      }
+
+      const response = await auditNamespace(namespace);
+      if (response?.type === 'AUDIT_RESULTS') {
+        auditResults = response.data;
+        observeAndInject();
+      }
     } catch (err) {
       if (err.message?.includes('401') || err.message?.includes('403')) {
         showSessionBanner();
       }
+    }
+  }
+
+  async function listNamespaces() {
+    const csrf = await getCsrf();
+    if (!csrf) return { error: 'No CSRF token' };
+    try {
+      const apiPrefix = currentManagedTenant ? `/managed_tenant/${currentManagedTenant}` : '';
+      const resp = await fetch(`${apiPrefix}/api/web/namespaces?csrf=${csrf}`);
+      if (!resp.ok) return { error: `API ${resp.status}` };
+      const data = await resp.json();
+      const namespaces = (data.items || []).map((ns) => ns.name).filter(Boolean);
+      return { namespaces };
+    } catch (err) {
+      return { error: err.message };
     }
   }
 
