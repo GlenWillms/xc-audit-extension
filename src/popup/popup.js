@@ -337,6 +337,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
           }
 
+          if (cat.id === 'policy' && lb.policyComparison) {
+            const cmp = lb.policyComparison;
+            const li = document.createElement('li');
+            if (cmp.match) {
+              li.className = 'diff-item diff-pass';
+              li.textContent = `Active service policies match ${cmp.baselineSource}`;
+            } else {
+              li.className = 'diff-item diff-info';
+              li.textContent = `Active service policies differ from ${cmp.baselineSource}`;
+            }
+            list.appendChild(li);
+          }
+
           catSection.appendChild(list);
           lbEl.appendChild(catSection);
         }

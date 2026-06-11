@@ -219,6 +219,8 @@ body {
   opacity: 1;
 }
 
+.diff-info { color: #0d6efd; }
+
 .diff-unavailable {
   color: #adb5bd;
   font-style: italic;

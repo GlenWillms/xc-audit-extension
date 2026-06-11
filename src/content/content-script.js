@@ -363,6 +363,15 @@
           }
         }
 
+        if (cat.id === 'policy' && result.policyComparison) {
+          const cmp = result.policyComparison;
+          if (cmp.match) {
+            html += `<span class="xc-audit-passed-tag">Active service policies match ${escapeHtml(cmp.baselineSource)}</span>`;
+          } else {
+            html += `<span class="xc-audit-info-tag">Active service policies differ from ${escapeHtml(cmp.baselineSource)}</span>`;
+          }
+        }
+
         html += `</div>`;
       }
     } else {

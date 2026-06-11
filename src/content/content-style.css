@@ -247,6 +247,16 @@
   letter-spacing: 0.3px;
 }
 
+.xc-audit-info-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  margin: 2px 4px 2px 0;
+  background: #cfe2ff;
+  color: #084298;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
 .xc-audit-inspection {
   margin: 4px 0;
   padding-left: 8px;

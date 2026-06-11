@@ -120,6 +120,7 @@ async function loadTenantConfig() {
 
   const s = config.settings || {};
   $('autoAudit').checked = (globalSettings || {}).autoAudit !== false;
+  $('comparePolicyToDefault').checked = s.comparePolicyToDefault !== false;
   $('planSelect').value = s.plan || 'essentials';
   renderAddons(s);
 }
@@ -512,6 +513,10 @@ function bindEvents() {
     await chrome.storage.local.set({
       settings: { ...existing, autoAudit: $('autoAudit').checked },
     });
+    if (selectedTenant) {
+      const config = await getTenantConfig(selectedTenant);
+      await setTenantData('settings', { ...(config.settings || {}), comparePolicyToDefault: $('comparePolicyToDefault').checked });
+    }
     showStatus('otherSettingsStatus', 'Settings saved', 'success');
   });
 

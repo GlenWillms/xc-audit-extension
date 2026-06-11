@@ -1,4 +1,4 @@
-import { runFullAudit, groupByCategory } from '../lib/audit-engine.js';
+import { runFullAudit, groupByCategory, comparePolicies } from '../lib/audit-engine.js';
 
 const tabData = {};
 
@@ -304,6 +304,15 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
       version: ver?.version || null,
       result: lbResult,
     };
+  }
+
+  const baselinePolicies = nsOverride || defaultPolicies;
+  if ((settings?.comparePolicyToDefault !== false) && namespace !== 'default' && policies && baselinePolicies) {
+    const baselineSource = nsOverride ? 'saved baseline' : 'default';
+    const policyComparison = { ...comparePolicies(policies, baselinePolicies), baselineSource };
+    for (const lbResult of results.loadBalancers) {
+      lbResult.policyComparison = policyComparison;
+    }
   }
 
   auditCache[cacheKey] = {

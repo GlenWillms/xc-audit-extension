@@ -302,6 +302,20 @@ function runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaseline
   return inspections;
 }
 
+export function comparePolicies(currentPolicies, baselinePolicies) {
+  const currentList = currentPolicies?.service_policies || [];
+  const baselineList = baselinePolicies?.service_policies || [];
+
+  const toKey = (p) => `${p.namespace || 'default'}/${p.name}`;
+  const currentKeys = new Set(currentList.map(toKey));
+  const baselineKeys = new Set(baselineList.map(toKey));
+
+  const match = currentKeys.size === baselineKeys.size &&
+    [...currentKeys].every((k) => baselineKeys.has(k));
+
+  return { match };
+}
+
 export function runFullAudit(lbConfigs, policyConfig, baseline, explanations, exemptionMap, referencedObjects) {
   const results = { policies: null, loadBalancers: [] };
   const inspectorBaselines = baseline.inspector_baselines || {};
