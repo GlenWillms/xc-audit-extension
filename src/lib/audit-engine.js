@@ -211,22 +211,28 @@ function runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaseline
   const inspections = [];
   if (!referencedObjects || !inspectorBaselines) return inspections;
 
-  // App Firewall inspection
+  // App Firewall sub-inspections
   const fwRef = lb.spec?.app_firewall;
-  const fwBaseline = inspectorBaselines.appFirewall;
-  if (fwRef?.name && fwBaseline && Object.keys(fwBaseline.spec || {}).length > 0) {
+  if (fwRef?.name) {
     const ns = fwRef.namespace || namespace;
-    const key = `${ns}/${fwRef.name}`;
-    const fwObject = referencedObjects.appFirewall?.[key];
+    const fwKey = `${ns}/${fwRef.name}`;
+    const fwObject = referencedObjects.appFirewall?.[fwKey];
     if (fwObject) {
-      const diffs = findDiffs(fwObject.spec || fwObject, fwBaseline.spec, 'appfw.spec');
-      inspections.push({
-        inspector: 'appFirewall',
-        categoryId: 'waf',
-        refName: fwRef.name,
-        pass: diffs.length === 0,
-        diffs: enrichDiffs(diffs, explanations),
-      });
+      const fwSpec = fwObject.spec || fwObject;
+      const wafInspectors = ['wafBlocking', 'wafThreatCampaigns', 'wafBotBlocking', 'wafAi'];
+      for (const name of wafInspectors) {
+        const baseline = inspectorBaselines[name];
+        if (baseline && Object.keys(baseline.spec || {}).length > 0) {
+          const diffs = findDiffs(fwSpec, baseline.spec, 'appfw.spec');
+          inspections.push({
+            inspector: name,
+            categoryId: 'waf',
+            refName: fwRef.name,
+            pass: diffs.length === 0,
+            diffs: enrichDiffs(diffs, explanations),
+          });
+        }
+      }
     }
   }
 
@@ -325,10 +331,8 @@ export function runFullAudit(lbConfigs, policyConfig, baseline, explanations, ex
       const namespace = lb.metadata?.namespace || lb.namespace;
       const allInspections = runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaselines, explanations, policyConfig);
       const inspections = allInspections.filter((i) => {
-        if (i.inspector === 'appFirewall' && skippedKeys.has('app_firewall')) return false;
-        if (i.inspector === 'geoPolicy' && skippedKeys.has('__inspector__geo_policy')) return false;
-        if (i.inspector === 'ipReputation' && skippedKeys.has('__inspector__ip_reputation')) return false;
-        return true;
+        const sentinelKey = `__inspector__${i.inspector.replace(/([A-Z])/g, '_$1').toLowerCase()}`;
+        return !skippedKeys.has(sentinelKey);
       });
 
       const failedKeys = new Set(diffs.map((d) => d.path.split('.')[1]));

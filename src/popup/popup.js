@@ -149,6 +149,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (resp?.policies) {
             await chrome.runtime.sendMessage({
               type: 'SAVE_POLICY_OVERRIDE',
+              tenant,
               namespace,
               policies: resp.policies,
             });
@@ -164,14 +165,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       btnRow.appendChild(setBaselineBtn);
 
-      const { policyOverrides } = await chrome.storage.local.get('policyOverrides');
+      const poKey = `tenant:${tenant}:policyOverrides`;
+      const poData = await chrome.storage.local.get([poKey, 'policyOverrides']);
+      const policyOverrides = poData[poKey] ?? poData.policyOverrides;
       if (policyOverrides?.[namespace]) {
         const clearBtn = document.createElement('button');
         clearBtn.className = 'btn btn-sm btn-secondary';
         clearBtn.textContent = 'Clear override (use default)';
         clearBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          await chrome.runtime.sendMessage({ type: 'CLEAR_POLICY_OVERRIDE', namespace });
+          await chrome.runtime.sendMessage({ type: 'CLEAR_POLICY_OVERRIDE', tenant, namespace });
           await chrome.runtime.sendMessage({ type: 'CLEAR_CACHE' });
           clearBtn.textContent = 'Cleared — re-audit';
           clearBtn.disabled = true;

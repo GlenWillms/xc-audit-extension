@@ -51,8 +51,40 @@
         "label": "App Firewall Policy",
         "description": "A Web Application Firewall policy must be assigned to inspect and block malicious HTTP requests.",
         "code": "ignore-waf",
-        "inspector": "appFirewall",
         "plan": "essentials"
+      },
+      {
+        "key": "__inspector__waf_blocking",
+        "label": "WAF Blocking Mode",
+        "description": "The app firewall policy must have blocking mode enabled to actively block malicious requests.",
+        "code": "ignore-waf",
+        "inspector": "wafBlocking",
+        "plan": "essentials"
+      },
+      {
+        "key": "__inspector__waf_threat_campaigns",
+        "label": "Threat Campaigns",
+        "description": "Threat campaign detection must be explicitly enabled to protect against coordinated attack patterns.",
+        "code": "ignore-waf",
+        "inspector": "wafThreatCampaigns",
+        "plan": "essentials"
+      },
+      {
+        "key": "__inspector__waf_bot_blocking",
+        "label": "Malicious Bot Blocking",
+        "description": "Bot protection must be configured to block malicious bots, using either default settings or a custom policy with malicious bot action set to Block.",
+        "code": "ignore-waf",
+        "inspector": "wafBotBlocking",
+        "plan": "essentials"
+      },
+      {
+        "key": "__inspector__waf_ai",
+        "label": "AI Risk Mitigation",
+        "description": "AI-powered risk mitigation uses machine learning to detect and mitigate high and medium risk threats.",
+        "code": "ignore-waf",
+        "inspector": "wafAi",
+        "required": false,
+        "plan": "enterprise"
       }
     ]
   },

@@ -18,9 +18,7 @@
               "https": { "add_hsts": true }
             }
           ],
-      "app_firewall": {
-        "name": "appfw-blocking"
-      },
+      "app_firewall": {},
       "ddos_mitigation_rules": [],
       "l7_ddos_protection": {
         "mitigation_block": {},
@@ -36,13 +34,31 @@
       "disable_api_testing": {},
       "disable_api_definition": {},
       "disable_client_side_defense": {},
+      "__inspector__waf_blocking": {},
+      "__inspector__waf_threat_campaigns": {},
+      "__inspector__waf_bot_blocking": {},
+      "__inspector__waf_ai": {},
       "__inspector__geo_policy": {},
       "__inspector__ip_reputation": {}
     }
   },
   "inspector_baselines": {
-    "appFirewall": {
-      "spec": {}
+    "wafBlocking": {
+      "spec": { "blocking": {} }
+    },
+    "wafThreatCampaigns": {
+      "spec": { "detection_settings": { "enable_threat_campaigns": {} } }
+    },
+    "wafBotBlocking": {
+      "spec": {
+        "__ONE_OF__bot_protection": [
+          { "default_bot_setting": {} },
+          { "bot_protection_setting": { "malicious_bot_action": "BLOCK" } }
+        ]
+      }
+    },
+    "wafAi": {
+      "spec": { "enable_ai_enhancements": {} }
     },
     "geoPolicy": {
       "blocked_countries": ["COUNTRY_RU", "COUNTRY_IR", "COUNTRY_KP"]

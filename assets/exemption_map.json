@@ -26,7 +26,7 @@
   },
   "ignore-waf": {
     "label": "Web App Firewall",
-    "keys": ["app_firewall"],
+    "keys": ["app_firewall", "__inspector__waf_blocking", "__inspector__waf_threat_campaigns", "__inspector__waf_bot_blocking", "__inspector__waf_ai"],
     "category": "Web Application Firewall"
   },
   "ignore-ddos": {
