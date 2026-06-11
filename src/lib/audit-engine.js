@@ -366,23 +366,32 @@ export function groupByCategory(lbResult, categories) {
     const cat = grouped.find((g) => g.checks.some((c) => c.key === topKey));
     if (cat) {
       const check = cat.checks.find((c) => c.key === topKey);
-      cat.failed.push({ ...diff, required: check?.required !== false });
+      cat.failed.push({ ...diff, required: check?.required !== false, plan: check?.plan || 'essentials' });
     }
   }
 
   for (const p of lbResult.passed || []) {
     const cat = grouped.find((g) => g.checks.some((c) => c.key === p.key));
-    if (cat) cat.passed.push(p);
+    if (cat) {
+      const check = cat.checks.find((c) => c.key === p.key);
+      cat.passed.push({ ...p, plan: check?.plan || 'essentials' });
+    }
   }
 
   for (const s of lbResult.skipped || []) {
     const cat = grouped.find((g) => g.checks.some((c) => c.key === s.key));
-    if (cat) cat.skipped.push(s);
+    if (cat) {
+      const check = cat.checks.find((c) => c.key === s.key);
+      cat.skipped.push({ ...s, plan: check?.plan || 'essentials' });
+    }
   }
 
   for (const insp of lbResult.inspections || []) {
     const cat = grouped.find((g) => g.id === insp.categoryId);
-    if (cat) cat.inspections.push(insp);
+    if (cat) {
+      const check = cat.checks?.find((c) => c.inspector === insp.inspector);
+      cat.inspections.push({ ...insp, plan: check?.plan || 'essentials' });
+    }
   }
 
   return grouped.filter(

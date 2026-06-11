@@ -15,6 +15,28 @@
     </div>
     <div id="resetAllStatus" class="status"></div>
 
+    <!-- Plan & Add-ons -->
+    <section class="card">
+      <h2>F5 XC Plan</h2>
+      <div class="param-section">
+        <label class="param-row">
+          <span class="param-label">Plan</span>
+          <select id="planSelect" class="param-input">
+            <option value="essentials">Essentials</option>
+            <option value="enterprise">Enterprise</option>
+          </select>
+        </label>
+        <p class="hint">Controls which checks are active. Enterprise-only checks are greyed out when not included in the selected plan.</p>
+      </div>
+      <h3>Add-ons</h3>
+      <p class="hint">Enable add-on features that are purchased separately.</p>
+      <div id="addonsContainer"></div>
+      <div class="button-row">
+        <button id="saveSettings" class="btn-primary">Save Settings</button>
+      </div>
+      <div id="settingsStatus" class="status"></div>
+    </section>
+
     <!-- Baseline checks -->
     <section class="card">
       <h2>Baseline Checks</h2>
@@ -71,9 +93,9 @@
         <span>Auto-audit on page load</span>
       </label>
       <div class="button-row">
-        <button id="saveSettings" class="btn-primary">Save Settings</button>
+        <button id="saveOtherSettings" class="btn-primary">Save Settings</button>
       </div>
-      <div id="settingsStatus" class="status"></div>
+      <div id="otherSettingsStatus" class="status"></div>
     </section>
 
     <!-- Raw JSON (power users) -->

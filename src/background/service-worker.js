@@ -190,8 +190,8 @@ async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersion
 }
 
 async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects }, forceRefresh) {
-  const { baseline, explanations, exemptionMap, policyOverrides } =
-    await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'policyOverrides']);
+  const { baseline, explanations, exemptionMap, policyOverrides, settings } =
+    await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'policyOverrides', 'settings']);
 
   if (!baseline) {
     return { type: 'AUDIT_ERROR', error: 'INVALID_BASELINE', message: 'No baseline configured.' };
@@ -215,14 +215,31 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
   );
 
   if (checkCategories.length) {
-    const optionalKeys = new Set(
-      checkCategories.flatMap((cat) => cat.checks.filter((c) => c.required === false).map((c) => c.key))
-    );
+    const plan = settings?.plan || 'essentials';
+    const enabledAddons = new Set(settings?.addons || []);
+
+    function isActiveForPlan(checkPlan, checkKey) {
+      if (checkPlan === 'essentials') return true;
+      if (checkPlan === 'enterprise') return plan === 'enterprise';
+      if (checkPlan === 'addon') return plan === 'enterprise' || enabledAddons.has(checkKey);
+      return false;
+    }
+
     for (const lbResult of results.loadBalancers) {
       lbResult.categorized = groupByCategory(lbResult, checkCategories);
-      const requiredDiffs = lbResult.diffs.filter((d) => !optionalKeys.has(d.path.split('.')[1]));
-      const requiredInspections = (lbResult.inspections || []).filter((i) => !optionalKeys.has(i.categoryId));
-      lbResult.pass = requiredDiffs.length === 0 && requiredInspections.every((i) => i.pass);
+      lbResult.plan = plan;
+      lbResult.addons = [...enabledAddons];
+
+      const activeDiffs = lbResult.diffs.filter((d) => {
+        const topKey = d.path.split('.')[1];
+        const check = checkCategories.flatMap((c) => c.checks).find((c) => c.key === topKey);
+        return isActiveForPlan(check?.plan, check?.key) && check?.required !== false;
+      });
+      const activeInspections = (lbResult.inspections || []).filter((i) => {
+        const check = checkCategories.flatMap((c) => c.checks).find((c) => c.inspector === i.inspector);
+        return isActiveForPlan(check?.plan, check?.key);
+      });
+      lbResult.pass = activeDiffs.length === 0 && activeInspections.every((i) => i.pass);
     }
   }
 

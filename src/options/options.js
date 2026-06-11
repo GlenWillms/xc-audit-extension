@@ -27,8 +27,32 @@ async function loadAll() {
 
   const s = settings || {};
   $('autoAudit').checked = s.autoAudit !== false;
+  $('planSelect').value = s.plan || 'essentials';
+  renderAddons(s);
 
   bindEvents();
+}
+
+function renderAddons(settings) {
+  const container = $('addonsContainer');
+  container.innerHTML = '';
+  const addons = CHECK_CATEGORIES.flatMap((cat) =>
+    cat.checks.filter((c) => c.plan === 'addon').map((c) => ({ ...c, category: cat.label }))
+  );
+  const enabledAddons = settings.addons || [];
+  for (const addon of addons) {
+    const row = document.createElement('label');
+    row.className = 'toggle-row';
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.checked = enabledAddons.includes(addon.key);
+    toggle.dataset.addonKey = addon.key;
+    const span = document.createElement('span');
+    span.textContent = addon.label;
+    row.appendChild(toggle);
+    row.appendChild(span);
+    container.appendChild(row);
+  }
 }
 
 function renderChecks(baseline) {
@@ -331,10 +355,21 @@ function bindEvents() {
   });
 
   $('saveSettings').addEventListener('click', async () => {
+    const addonToggles = $('addonsContainer').querySelectorAll('input[type="checkbox"]');
+    const addons = [...addonToggles].filter((t) => t.checked).map((t) => t.dataset.addonKey);
+    const { settings: existing } = await chrome.storage.local.get('settings');
     await chrome.storage.local.set({
-      settings: { autoAudit: $('autoAudit').checked },
+      settings: { ...existing, plan: $('planSelect').value, addons },
     });
-    showStatus('settingsStatus', 'Settings saved', 'success');
+    showStatus('settingsStatus', 'Plan settings saved', 'success');
+  });
+
+  $('saveOtherSettings').addEventListener('click', async () => {
+    const { settings: existing } = await chrome.storage.local.get('settings');
+    await chrome.storage.local.set({
+      settings: { ...existing, autoAudit: $('autoAudit').checked },
+    });
+    showStatus('otherSettingsStatus', 'Settings saved', 'success');
   });
 
   $('saveRawJson').addEventListener('click', async () => {

@@ -245,11 +245,29 @@
     return checks?.find((c) => c.key === topKey) || null;
   }
 
-  function buildDiffHtml(d, checks) {
+  function isActiveForPlan(checkPlan, currentPlan, addons, checkKey) {
+    if (checkPlan === 'essentials') return true;
+    if (checkPlan === 'enterprise') return currentPlan === 'enterprise';
+    if (checkPlan === 'addon') return currentPlan === 'enterprise' || addons?.includes(checkKey);
+    return false;
+  }
+
+  function planTagLabel(checkPlan) {
+    if (checkPlan === 'enterprise') return 'Enterprise';
+    if (checkPlan === 'addon') return 'Add-on';
+    return null;
+  }
+
+  function buildDiffHtml(d, checks, planCtx) {
     const check = resolveCheck(checks, d.path);
     const displayName = check?.label || d.path;
     const tooltip = check?.description || '';
     const isOptional = d.required === false;
+    const active = isActiveForPlan(d.plan || check?.plan || 'essentials', planCtx?.plan, planCtx?.addons, check?.key);
+    if (!active) {
+      const tag = planTagLabel(d.plan || check?.plan);
+      return `<div class="xc-audit-issue xc-audit-unavailable"><span class="xc-audit-plan-tag">${tag}</span><div class="xc-audit-issue-path"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(displayName)}</div></div>`;
+    }
     let html = `<div class="xc-audit-issue${isOptional ? ' xc-audit-issue-optional' : ''}">`;
     if (isOptional) {
       html += `<span class="xc-audit-recommended-tag">Recommended</span>`;
@@ -276,6 +294,8 @@
     row.className = 'xc-audit-detail-row';
     let html = '';
 
+    const currentPlan = result.plan || 'essentials';
+    const planCtx = { plan: currentPlan, addons: result.addons || [] };
     if (result.categorized?.length) {
       for (const cat of result.categorized) {
         html += `<div class="xc-audit-category">`;
@@ -283,7 +303,7 @@
 
         if (cat.failed.length) {
           for (const d of cat.failed) {
-            html += buildDiffHtml(d, cat.checks);
+            html += buildDiffHtml(d, cat.checks, planCtx);
           }
         }
 
@@ -292,13 +312,17 @@
             const inspCheck = cat.checks?.find((c) => c.inspector === insp.inspector);
             const inspLabel = inspCheck?.label || insp.refName;
             const inspTooltip = inspCheck?.description || '';
-            if (insp.pass) {
+            const active = isActiveForPlan(insp.plan || inspCheck?.plan || 'essentials', currentPlan, planCtx.addons, inspCheck?.key);
+            if (!active) {
+              const tag = planTagLabel(insp.plan || inspCheck?.plan);
+              html += `<span class="xc-audit-unavailable-tag" data-tooltip="${escapeHtml(inspTooltip)}">${escapeHtml(inspLabel)} — ${tag}</span>`;
+            } else if (insp.pass) {
               html += `<span class="xc-audit-passed-tag"${inspTooltip ? ` data-tooltip="${escapeHtml(inspTooltip)}"` : ''}>${escapeHtml(inspLabel)}</span>`;
             } else {
               html += `<div class="xc-audit-inspection">`;
               html += `<div class="xc-audit-inspection-header"${inspTooltip ? ` data-tooltip="${escapeHtml(inspTooltip)}"` : ''}>${escapeHtml(inspLabel)} (${insp.diffs.length} issue${insp.diffs.length === 1 ? '' : 's'})</div>`;
               for (const d of insp.diffs) {
-                html += buildDiffHtml(d, null);
+                html += buildDiffHtml(d, null, planCtx);
               }
               html += `</div>`;
             }
@@ -319,7 +343,13 @@
             const check = cat.checks?.find((c) => c.key === p.key);
             const label = check?.label || p.key;
             const tooltip = check?.description || '';
-            html += `<span class="xc-audit-passed-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)}</span>`;
+            const active = isActiveForPlan(p.plan || check?.plan || 'essentials', currentPlan, planCtx.addons, check?.key);
+            if (!active) {
+              const tag = planTagLabel(p.plan || check?.plan);
+              html += `<span class="xc-audit-unavailable-tag" data-tooltip="${escapeHtml(tooltip)}">${escapeHtml(label)} — ${tag}</span>`;
+            } else {
+              html += `<span class="xc-audit-passed-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)}</span>`;
+            }
           }
         }
 
@@ -367,11 +397,16 @@
       const result = auditResults.loadBalancers.find((lb) => lb.name === lbName);
       if (!result) continue;
 
+      const plan = result.plan || 'essentials';
+      const addons = result.addons || [];
+      const activeDiffs = result.diffs.filter((d) => isActiveForPlan(d.plan || 'essentials', plan, addons, d.key));
+      const activeInspections = (result.inspections || []).filter((i) => isActiveForPlan(i.plan || 'essentials', plan, addons, i.key));
+      const activePassed = (result.passed || []).filter((p) => isActiveForPlan(p.plan || 'essentials', plan, addons, p.key));
       const skipCount = result.skipped?.length || 0;
-      const passCount = result.passed?.length || 0;
-      const recommendedCount = result.diffs.filter((d) => d.required === false).length;
-      const requiredFailCount = result.diffs.filter((d) => d.required !== false).length +
-        (result.inspections || []).filter((i) => !i.pass).length;
+      const passCount = activePassed.length;
+      const recommendedCount = activeDiffs.filter((d) => d.required === false).length;
+      const requiredFailCount = activeDiffs.filter((d) => d.required !== false).length +
+        activeInspections.filter((i) => !i.pass).length;
       const badge = document.createElement('span');
       badge.className = `xc-audit-badge ${result.pass ? 'xc-audit-pass' : 'xc-audit-fail'}`;
 

@@ -7,33 +7,38 @@
         "key": "__ONE_OF__tls",
         "label": "TLS (Auto-Cert or Custom)",
         "description": "Load balancer must serve traffic over HTTPS using either an auto-provisioned certificate or a manually uploaded certificate.",
-        "code": "ignore-tls"
+        "code": "ignore-tls",
+        "plan": "essentials"
       },
       {
         "key": "__ONE_OF__hsts",
         "label": "HSTS",
         "description": "HTTP Strict Transport Security header must be enabled to prevent protocol downgrade attacks.",
-        "code": "ignore-hsts"
+        "code": "ignore-hsts",
+        "plan": "essentials"
       },
       {
         "key": "__inspector__ip_reputation",
         "label": "IP Reputation",
         "description": "A service policy with IP threat intelligence categories must be applied to block traffic from known malicious sources.",
         "code": "ignore-iprep",
-        "inspector": "ipReputation"
+        "inspector": "ipReputation",
+        "plan": "essentials"
       },
       {
         "key": "disable_trust_client_ip_headers",
         "label": "Trust Client IP Headers",
         "description": "Trusting client-supplied IP headers (X-Forwarded-For) must be disabled to prevent IP spoofing.",
-        "code": "ignore-trustip"
+        "code": "ignore-trustip",
+        "plan": "essentials"
       },
       {
         "key": "__inspector__geo_policy",
         "label": "Geo Policy",
         "description": "Service policies must block traffic from specific countries or regions as defined in the baseline.",
         "code": "ignore-geo",
-        "inspector": "geoPolicy"
+        "inspector": "geoPolicy",
+        "plan": "essentials"
       }
     ]
   },
@@ -46,7 +51,8 @@
         "label": "App Firewall Policy",
         "description": "A Web Application Firewall policy must be assigned to inspect and block malicious HTTP requests.",
         "code": "ignore-waf",
-        "inspector": "appFirewall"
+        "inspector": "appFirewall",
+        "plan": "essentials"
       }
     ]
   },
@@ -58,13 +64,15 @@
         "key": "ddos_mitigation_rules",
         "label": "DDoS Mitigation Rules",
         "description": "DDoS mitigation rules define thresholds and actions for volumetric attack protection.",
-        "code": "ignore-ddos"
+        "code": "ignore-ddos",
+        "plan": "essentials"
       },
       {
         "key": "l7_ddos_protection",
         "label": "L7 DDoS Protection",
         "description": "Layer 7 DDoS protection detects and mitigates application-layer flood attacks using request rate analysis.",
-        "code": "ignore-ddos"
+        "code": "ignore-ddos",
+        "plan": "essentials"
       }
     ]
   },
@@ -77,14 +85,16 @@
         "label": "Bot Defense",
         "description": "Bot Defense uses JavaScript and API signals to detect and block automated threats like credential stuffing and scraping.",
         "code": "ignore-bot",
-        "required": false
+        "required": false,
+        "plan": "addon"
       },
       {
         "key": "disable_client_side_defense",
         "label": "Client-Side Defense",
         "description": "Client-Side Defense detects and blocks malicious scripts injected into web pages (Magecart, formjacking).",
         "code": "ignore-csd",
-        "required": false
+        "required": false,
+        "plan": "addon"
       }
     ]
   },
@@ -96,19 +106,22 @@
         "key": "enable_api_discovery",
         "label": "API Discovery",
         "description": "API Discovery automatically inventories API endpoints and detects shadow or undocumented APIs.",
-        "code": "ignore-apid"
+        "code": "ignore-apid",
+        "plan": "addon"
       },
       {
         "key": "disable_api_definition",
         "label": "API Definition",
         "description": "API Definition enforcement validates requests against an OpenAPI spec to block malformed or unexpected calls.",
-        "code": "ignore-apip"
+        "code": "ignore-apip",
+        "plan": "essentials"
       },
       {
         "key": "disable_api_testing",
         "label": "API Testing",
         "description": "API Testing runs automated security scans against discovered API endpoints to find vulnerabilities.",
-        "code": "ignore-apip"
+        "code": "ignore-apip",
+        "plan": "enterprise"
       }
     ]
   },
@@ -120,13 +133,15 @@
         "key": "service_policies_from_namespace",
         "label": "Service Policies (from namespace)",
         "description": "Service policies from the namespace apply centrally managed rules (geo-fencing, IP block lists) to all load balancers.",
-        "code": "ignore-sp"
+        "code": "ignore-sp",
+        "plan": "essentials"
       },
       {
         "key": "default_sensitive_data_policy",
         "label": "Sensitive Data Policy",
         "description": "Sensitive Data Policy masks or blocks exposure of PII, credentials, and other sensitive data in responses.",
-        "code": "ignore-sdp"
+        "code": "ignore-sdp",
+        "plan": "enterprise"
       }
     ]
   }

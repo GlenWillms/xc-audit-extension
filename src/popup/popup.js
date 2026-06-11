@@ -195,11 +195,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       const lbEl = document.createElement('details');
       lbEl.className = `lb-detail ${lb.pass ? 'lb-pass' : 'lb-fail'}`;
 
+      const plan = lb.plan || 'essentials';
+      const addons = new Set(lb.addons || []);
+      const isActive = (checkPlan, checkKey) => {
+        if (checkPlan === 'essentials') return true;
+        if (checkPlan === 'enterprise') return plan === 'enterprise';
+        if (checkPlan === 'addon') return plan === 'enterprise' || addons.has(checkKey);
+        return false;
+      };
+      const activeDiffs = lb.diffs.filter((d) => isActive(d.plan || 'essentials', d.key));
+      const activeInspections = (lb.inspections || []).filter((i) => isActive(i.plan || 'essentials', i.key));
+      const activePassed = (lb.passed || []).filter((p) => isActive(p.plan || 'essentials', p.key));
       const skipCount = lb.skipped?.length || 0;
-      const passCount = lb.passed?.length || 0;
-      const recommendedCount = lb.diffs.filter((d) => d.required === false).length;
-      const requiredFailCount = lb.diffs.filter((d) => d.required !== false).length +
-        (lb.inspections || []).filter((i) => !i.pass).length;
+      const passCount = activePassed.length;
+      const recommendedCount = activeDiffs.filter((d) => d.required === false).length;
+      const requiredFailCount = activeDiffs.filter((d) => d.required !== false).length +
+        activeInspections.filter((i) => !i.pass).length;
       const summary = document.createElement('summary');
       const parts = [];
       if (passCount) parts.push(`${passCount} passed`);
@@ -226,21 +237,29 @@ document.addEventListener('DOMContentLoaded', async () => {
             const check = cat.checks?.find((c) => d.path.split('.')[1] === c.key);
             const displayName = check?.label || d.path;
             const isOptional = d.required === false;
+            const active = isActive(d.plan || check?.plan || 'essentials', check?.key);
             const li = document.createElement('li');
-            li.className = `diff-item ${isOptional ? 'diff-recommended' : 'diff-fail'}`;
-            if (check?.description) li.dataset.tooltip = check.description;
-            let text = isOptional ? `${displayName} — recommended` : displayName;
-            if (d.type === 'MISSING') {
-              text += isOptional ? '' : ' — missing';
+            if (!active) {
+              const tag = (d.plan || check?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+              li.className = 'diff-item diff-unavailable';
+              if (check?.description) li.dataset.tooltip = check.description;
+              li.textContent = `${displayName} — ${tag}`;
             } else {
-              text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
-            }
-            li.textContent = text;
-            if (d.explanation) {
-              const reason = document.createElement('div');
-              reason.className = 'diff-reason';
-              reason.textContent = d.explanation.reason;
-              li.appendChild(reason);
+              li.className = `diff-item ${isOptional ? 'diff-recommended' : 'diff-fail'}`;
+              if (check?.description) li.dataset.tooltip = check.description;
+              let text = isOptional ? `${displayName} — recommended` : displayName;
+              if (d.type === 'MISSING') {
+                text += isOptional ? '' : ' — missing';
+              } else {
+                text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
+              }
+              li.textContent = text;
+              if (d.explanation) {
+                const reason = document.createElement('div');
+                reason.className = 'diff-reason';
+                reason.textContent = d.explanation.reason;
+                li.appendChild(reason);
+              }
             }
             list.appendChild(li);
           }
@@ -248,7 +267,15 @@ document.addEventListener('DOMContentLoaded', async () => {
           for (const insp of cat.inspections || []) {
             const inspCheck = cat.checks?.find((c) => c.inspector === insp.inspector);
             const inspLabel = inspCheck?.label || insp.refName;
-            if (insp.pass) {
+            const active = isActive(insp.plan || inspCheck?.plan || 'essentials', inspCheck?.key);
+            if (!active) {
+              const tag = (insp.plan || inspCheck?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+              const li = document.createElement('li');
+              li.className = 'diff-item diff-unavailable';
+              if (inspCheck?.description) li.dataset.tooltip = inspCheck.description;
+              li.textContent = `${inspLabel} — ${tag}`;
+              list.appendChild(li);
+            } else if (insp.pass) {
               const li = document.createElement('li');
               li.className = 'diff-item diff-pass';
               if (inspCheck?.description) li.dataset.tooltip = inspCheck.description;
@@ -291,10 +318,18 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (cat.passed.length) {
             for (const p of cat.passed) {
               const check = cat.checks?.find((c) => c.key === p.key);
+              const active = isActive(p.plan || check?.plan || 'essentials', check?.key);
               const li = document.createElement('li');
-              li.className = 'diff-item diff-pass';
-              if (check?.description) li.dataset.tooltip = check.description;
-              li.textContent = check?.label || p.key;
+              if (!active) {
+                const tag = (p.plan || check?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+                li.className = 'diff-item diff-unavailable';
+                if (check?.description) li.dataset.tooltip = check.description;
+                li.textContent = `${check?.label || p.key} — ${tag}`;
+              } else {
+                li.className = 'diff-item diff-pass';
+                if (check?.description) li.dataset.tooltip = check.description;
+                li.textContent = check?.label || p.key;
+              }
               list.appendChild(li);
             }
           }
