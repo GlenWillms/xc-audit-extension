@@ -114,9 +114,9 @@ async function loadTenantConfig() {
   renderPolicies();
   renderExemptionMap(config.exemptionMap || {});
   renderRawJson(config.baseline, config.explanations);
-  $('registerLabels').textContent = selectedTenant
-    ? `Register Labels in ${shortTenantName(selectedTenant)}`
-    : 'Register Labels in XC';
+  const tenantLabel = selectedTenant ? shortTenantName(selectedTenant) : 'XC';
+  $('registerLabels').textContent = `Register Labels in ${tenantLabel}`;
+  $('deleteLabels').textContent = `Delete Labels from ${tenantLabel}`;
 
   const s = config.settings || {};
   $('autoAudit').checked = (globalSettings || {}).autoAudit !== false;
@@ -419,6 +419,7 @@ function bindEvents() {
     const labels = Object.keys(map).map((code) => ({
       key: `xc-audit-${code}`,
       value: 'true',
+      description: `Exempts load balancer from ${map[code].label} audit checks`,
     }));
 
     try {
@@ -437,6 +438,45 @@ function bindEvents() {
       const parts = [];
       if (created) parts.push(`${created} created`);
       if (exists) parts.push(`${exists} already exist`);
+      if (errItems.length) parts.push(`${errItems.length} failed`);
+
+      let msg = `Labels: ${parts.join(', ')}`;
+      if (errItems.length) {
+        msg += '\n' + errItems.map((e) => `  ${e.key}: ${e.detail}`).join('\n');
+      }
+      showStatus('exemptionStatus', msg, errItems.length ? 'error' : 'success');
+    } catch {
+      showStatus('exemptionStatus', 'Could not reach the XC console tab. Refresh the page and try again.', 'error');
+    }
+  });
+
+  $('deleteLabels').addEventListener('click', async () => {
+    const tenantLabel = selectedTenant ? shortTenantName(selectedTenant) : 'XC';
+    if (!confirm(`Delete all xc-audit labels from ${tenantLabel}? This cannot be undone.`)) return;
+    showStatus('exemptionStatus', 'Deleting labels...', 'success');
+
+    const map = collectExemptionMap();
+    const labels = Object.keys(map).map((code) => ({
+      key: `xc-audit-${code}`,
+      value: 'true',
+    }));
+
+    try {
+      const response = await sendToXcTab({ type: 'DELETE_LABELS', labels });
+
+      if (response?.error) {
+        showStatus('exemptionStatus', response.error, 'error');
+        return;
+      }
+
+      const r = response?.results || [];
+      const deleted = r.filter((x) => x.status === 'deleted').length;
+      const notFound = r.filter((x) => x.status === 'not_found').length;
+      const errItems = r.filter((x) => x.status === 'error');
+
+      const parts = [];
+      if (deleted) parts.push(`${deleted} deleted`);
+      if (notFound) parts.push(`${notFound} not found`);
       if (errItems.length) parts.push(`${errItems.length} failed`);
 
       let msg = `Labels: ${parts.join(', ')}`;

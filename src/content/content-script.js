@@ -15,11 +15,21 @@
         chrome.runtime.sendMessage({ type: 'CLEAR_CACHE' }, () => checkPage(true));
       }
       if (message.type === 'REGISTER_LABELS') {
-        registerLabels(message.labels).then(sendResponse);
+        registerLabels(message.labels)
+          .then(sendResponse)
+          .catch((err) => sendResponse({ error: err.message }));
+        return true;
+      }
+      if (message.type === 'DELETE_LABELS') {
+        deleteLabels(message.labels)
+          .then(sendResponse)
+          .catch((err) => sendResponse({ error: err.message }));
         return true;
       }
       if (message.type === 'GET_POLICIES') {
-        fetchPolicies(message.namespace).then(sendResponse);
+        fetchPolicies(message.namespace)
+          .then(sendResponse)
+          .catch((err) => sendResponse({ error: err.message }));
         return true;
       }
     });
@@ -460,6 +470,76 @@
     if (!csrf) return { error: 'No CSRF token available. Navigate to the XC console first.' };
 
     const apiPrefix = currentManagedTenant ? `/managed_tenant/${currentManagedTenant}` : '';
+    const api = async (method, path, body) => {
+      const opts = { method, headers: { 'Content-Type': 'application/json' } };
+      if (body) opts.body = JSON.stringify(body);
+      const resp = await fetch(`${apiPrefix}${path}?csrf=${csrf}`, opts);
+      const text = await resp.text();
+      return { ok: resp.ok, status: resp.status, body: text };
+    };
+
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    const results = [];
+
+    for (const { key, value, description } of labels) {
+      try {
+        const keyResp = await api('POST',
+          '/api/config/namespaces/shared/known_label_key/create',
+          { namespace: 'shared', key, description }
+        );
+        const keyExists = keyResp.body.includes('already exists') || keyResp.status === 409;
+        const keyOk = keyResp.ok || keyExists;
+        if (!keyOk) {
+          results.push({ key, value, status: 'error', detail: `key: ${keyResp.status}: ${keyResp.body.slice(0, 200)}` });
+          await delay(1500);
+          continue;
+        }
+
+        if (keyExists && description) {
+          await delay(1500);
+          const getResp = await api('GET', `/api/config/namespaces/shared/known_label_key/${key}`);
+          if (getResp.ok) {
+            try {
+              const existing = JSON.parse(getResp.body);
+              if (!existing.description && !existing.spec?.description) {
+                await delay(1500);
+                await api('PUT', `/api/config/namespaces/shared/known_label_key/${key}`,
+                  { namespace: 'shared', key, description }
+                );
+              }
+            } catch {}
+          }
+        }
+
+        await delay(1500);
+
+        const valResp = await api('POST',
+          '/api/config/namespaces/shared/known_label/create',
+          { namespace: 'shared', key, value, description }
+        );
+        if (valResp.ok) {
+          results.push({ key, value, status: 'created' });
+        } else {
+          const exists = valResp.body.includes('already exists') || valResp.status === 409;
+          results.push({
+            key, value,
+            status: exists ? 'exists' : 'error',
+            detail: exists ? undefined : `val: ${valResp.status}: ${valResp.body.slice(0, 200)}`,
+          });
+        }
+      } catch (err) {
+        results.push({ key, value, status: 'error', detail: err.message });
+      }
+      await delay(1500);
+    }
+    return { results };
+  }
+
+  async function deleteLabels(labels) {
+    const csrf = await getCsrf();
+    if (!csrf) return { error: 'No CSRF token available. Navigate to the XC console first.' };
+
+    const apiPrefix = currentManagedTenant ? `/managed_tenant/${currentManagedTenant}` : '';
     const post = async (path, body) => {
       const resp = await fetch(`${apiPrefix}${path}?csrf=${csrf}`, {
         method: 'POST',
@@ -475,31 +555,26 @@
 
     for (const { key, value } of labels) {
       try {
-        const keyResp = await post(
-          '/api/config/namespaces/shared/known_label_key/create',
-          { namespace: 'shared', key }
-        );
-        const keyOk = keyResp.ok || keyResp.body.includes('already exists') || keyResp.status === 409;
-        if (!keyOk) {
-          results.push({ key, value, status: 'error', detail: `key: ${keyResp.status}: ${keyResp.body.slice(0, 200)}` });
-          await delay(1500);
-          continue;
-        }
-
-        await delay(1500);
-
         const valResp = await post(
-          '/api/config/namespaces/shared/known_label/create',
+          '/api/config/namespaces/shared/known_label/delete',
           { namespace: 'shared', key, value }
         );
-        if (valResp.ok) {
-          results.push({ key, value, status: 'created' });
+        await delay(1500);
+
+        const keyResp = await post(
+          '/api/config/namespaces/shared/known_label_key/delete',
+          { namespace: 'shared', key }
+        );
+
+        if (valResp.ok || keyResp.ok) {
+          results.push({ key, value, status: 'deleted' });
         } else {
-          const exists = valResp.body.includes('already exists') || valResp.status === 409;
+          const notFound = (valResp.status === 404 || valResp.body.includes('not found')) &&
+            (keyResp.status === 404 || keyResp.body.includes('not found'));
           results.push({
             key, value,
-            status: exists ? 'exists' : 'error',
-            detail: exists ? undefined : `val: ${valResp.status}: ${valResp.body.slice(0, 200)}`,
+            status: notFound ? 'not_found' : 'error',
+            detail: notFound ? undefined : `${keyResp.status}: ${keyResp.body.slice(0, 200)}`,
           });
         }
       } catch (err) {
