@@ -412,7 +412,110 @@ export function groupByCategory(lbResult, categories) {
     }
   }
 
+  for (const o of lbResult.baselineOverrides || []) {
+    let targetCatId;
+    if (o.inspector) {
+      targetCatId = o.categoryId;
+    } else if (o.path) {
+      const topKey = o.path.split('.')[1];
+      const matchCat = categories.find((c) => c.checks.some((ch) => ch.key === topKey));
+      targetCatId = matchCat?.id;
+    }
+    if (!targetCatId) continue;
+    let catGroup = grouped.find((g) => g.id === targetCatId);
+    if (!catGroup) {
+      const catDef = categories.find((c) => c.id === targetCatId);
+      if (catDef) {
+        catGroup = { id: catDef.id, label: catDef.label, checks: catDef.checks, passed: [], warnings: [], skipped: [], inspections: [], overrides: [] };
+        grouped.push(catGroup);
+      }
+    }
+    if (catGroup) {
+      if (!catGroup.overrides) catGroup.overrides = [];
+      const check = o.inspector
+        ? catGroup.checks?.find((c) => c.inspector === o.inspector)
+        : catGroup.checks?.find((c) => c.key === o.path?.split('.')[1]);
+      catGroup.overrides.push({ ...o, plan: check?.plan || 'essentials' });
+    }
+  }
+
   return grouped.filter(
-    (g) => g.passed.length || g.warnings.length || g.skipped.length || g.inspections.length
+    (g) => g.passed.length || g.warnings.length || g.skipped.length || g.inspections.length || (g.overrides?.length)
   );
+}
+
+export function applyBaselineLbOverrides(results, lbConfigs, baselineLbConfigs, baselineLbReferencedObjects, baseline, explanations, defaultPolicies) {
+  const inspectorBaselines = baseline.inspector_baselines || {};
+  const lbBaseSpec = baseline.lb_baseline?.spec || {};
+
+  const diffSpec = {};
+  for (const [k, v] of Object.entries(lbBaseSpec)) {
+    if (!k.startsWith('__inspector__')) diffSpec[k] = v;
+  }
+
+  const baselineLbAuditCache = {};
+
+  function auditBaselineLb(baselineLbName) {
+    if (baselineLbAuditCache[baselineLbName]) return baselineLbAuditCache[baselineLbName];
+
+    const blb = baselineLbConfigs[baselineLbName];
+    if (!blb) return null;
+
+    const blbSpec = blb.spec || {};
+    const blbDiffs = findDiffs(blbSpec, diffSpec, 'spec');
+    const failedPaths = new Set(blbDiffs.map((d) => d.path));
+
+    const blbNs = blb.metadata?.namespace || 'default';
+    const blbInspections = runInspectionsForLb(blb, blbNs, baselineLbReferencedObjects, inspectorBaselines, explanations, defaultPolicies);
+    const failedInspectors = new Set(blbInspections.filter((i) => !i.pass).map((i) => i.inspector));
+
+    const result = { failedPaths, failedInspectors };
+    baselineLbAuditCache[baselineLbName] = result;
+    return result;
+  }
+
+  for (const lbResult of results.loadBalancers) {
+    const lbConfig = lbConfigs.find((lb) => (lb.metadata?.name || lb.name) === lbResult.name);
+    if (!lbConfig) continue;
+
+    const labels = lbConfig.metadata?.labels || lbConfig.labels || {};
+    const baselineLbName = labels['xc-audit-baseline-lb'];
+    if (!baselineLbName) continue;
+
+    const blbAudit = auditBaselineLb(baselineLbName);
+    if (!blbAudit) continue;
+
+    lbResult.baselineLb = baselineLbName;
+    lbResult.baselineOverrides = [];
+
+    const remainingDiffs = [];
+    for (const diff of lbResult.diffs) {
+      if (blbAudit.failedPaths.has(diff.path)) {
+        lbResult.baselineOverrides.push({ ...diff, overrideStatus: 'pass' });
+        const key = diff.path.split('.')[1];
+        if (!lbResult.passed.find((p) => p.key === key)) {
+          lbResult.passed.push({ key, path: diff.path });
+        }
+      } else {
+        remainingDiffs.push(diff);
+      }
+    }
+    lbResult.diffs = remainingDiffs;
+
+    const remainingInspections = [];
+    for (const insp of lbResult.inspections) {
+      if (!insp.pass) {
+        if (blbAudit.failedInspectors.has(insp.inspector)) {
+          lbResult.baselineOverrides.push({ ...insp, overrideStatus: 'pass' });
+        } else {
+          remainingInspections.push(insp);
+        }
+      } else {
+        remainingInspections.push(insp);
+      }
+    }
+    lbResult.inspections = remainingInspections;
+
+    lbResult.pass = lbResult.diffs.length === 0 && lbResult.inspections.every((i) => i.pass);
+  }
 }

@@ -106,6 +106,41 @@ Before labels can be assigned to LB objects, they must be registered as "known l
 
 This requires an open XC console tab for authentication. Labels are registered in the `shared` namespace so they're available across all namespaces.
 
+## Baseline LB Override
+
+Instead of comparing every LB against the static baseline configuration, you can point an LB at a reference LB in the `default` namespace. The reference LB defines the expected security posture — if the reference LB itself doesn't have a feature enabled, the audited LB won't be warned for missing it either.
+
+### How It Works
+
+1. Create a reference LB in the `default` namespace that represents the expected configuration for a group of LBs (e.g., `baseline-enterprise`)
+2. On each production LB that should use this reference, add the label:
+   - **Key**: `xc-audit-baseline-lb`
+   - **Value**: the name of the reference LB (e.g., `baseline-enterprise`)
+3. At audit time, the extension fetches the reference LB and runs the same checks against it
+4. For each check the audited LB fails:
+   - If the reference LB **also fails** that check → the finding becomes a **pass** (the reference doesn't require it)
+   - If the reference LB **passes** that check → the finding stays a **warning** (the audited LB is below the reference)
+
+### Example
+
+If `baseline-enterprise` has Bot Defense disabled (`disable_bot_defense`), any LB referencing it won't be warned for also having Bot Defense disabled. But if `baseline-enterprise` has API Discovery enabled and the audited LB doesn't, that shows as a warning.
+
+### Badge Display
+
+LBs using a baseline LB override show:
+- A `ref: baseline-enterprise` tag next to the audit badge
+- Checks that passed via the reference show as green tags with "via baseline-enterprise"
+- Checks that the LB fails against the reference show as normal warnings
+
+### Notes
+
+- The reference LB must exist in the `default` namespace
+- Multiple LBs can reference the same baseline LB
+- Different LBs can reference different baseline LBs
+- If the referenced LB doesn't exist, the audit falls back to normal behavior
+- Label-based exemptions are applied before the baseline LB override
+- Changing the reference LB's configuration requires a re-audit (click **Re-Audit** in the popup)
+
 ## Service Policy Baseline
 
 By default, the extension fetches the `default` namespace's active service policies and uses them as the baseline for policy comparison. This means all namespaces are expected to have the same policy order as `default`.

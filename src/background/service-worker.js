@@ -1,4 +1,4 @@
-import { runFullAudit, groupByCategory, comparePolicies } from '../lib/audit-engine.js';
+import { runFullAudit, groupByCategory, comparePolicies, applyBaselineLbOverrides } from '../lib/audit-engine.js';
 
 const tabData = {};
 
@@ -236,7 +236,7 @@ async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersion
   return { stale, fresh };
 }
 
-async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects }, forceRefresh) {
+async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects, baselineLbConfigs, baselineLbReferencedObjects }, forceRefresh) {
   await trackTenant(tenant);
   const { baseline, explanations, exemptionMap, policyOverrides, settings } = await getTenantConfig(tenant);
 
@@ -260,6 +260,14 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
     exemptionMap || {},
     referencedObjects || {}
   );
+
+  if (baselineLbConfigs && Object.keys(baselineLbConfigs).length > 0) {
+    applyBaselineLbOverrides(
+      results, lbConfigs || [], baselineLbConfigs,
+      baselineLbReferencedObjects || {},
+      effectiveBaseline, explanations || {}, defaultPolicies
+    );
+  }
 
   if (checkCategories.length) {
     const plan = settings?.plan || 'essentials';
@@ -308,7 +316,7 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
 
   const baselinePolicies = nsOverride || defaultPolicies;
   if ((settings?.comparePolicyToDefault !== false) && namespace !== 'default' && policies && baselinePolicies) {
-    const baselineSource = nsOverride ? 'saved baseline' : 'default';
+    const baselineSource = nsOverride ? 'saved baseline' : 'default namespace';
     const policyComparison = { ...comparePolicies(policies, baselinePolicies), baselineSource };
     for (const lbResult of results.loadBalancers) {
       lbResult.policyComparison = policyComparison;

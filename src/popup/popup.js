@@ -220,7 +220,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (requiredWarningCount) parts.push(`${requiredWarningCount} warnings`);
       if (recommendedCount) parts.push(`${recommendedCount} recommended`);
       if (skipCount) parts.push(`${skipCount} skipped`);
-      summary.textContent = `${lb.pass ? '✓' : '✗'} ${lb.name} (${parts.join(', ')})`;
+      const refNote = lb.baselineLb ? ` [ref: ${lb.baselineLb}]` : '';
+      summary.textContent = `${lb.pass ? '✓' : '✗'} ${lb.name}${refNote} (${parts.join(', ')})`;
       lbEl.appendChild(summary);
 
       if (lb.categorized?.length) {
@@ -304,6 +305,26 @@ document.addEventListener('DOMContentLoaded', async () => {
                 list.appendChild(li);
               }
             }
+          }
+
+          for (const o of (cat.overrides || [])) {
+            const check = o.inspector
+              ? cat.checks?.find((c) => c.inspector === o.inspector)
+              : cat.checks?.find((c) => c.key === o.path?.split('.')[1]);
+            const label = check?.label || o.path || o.inspector;
+            const active = isActive(o.plan || check?.plan || 'essentials', check?.key);
+            const li = document.createElement('li');
+            if (!active) {
+              const tag = (o.plan || check?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+              li.className = 'diff-item diff-unavailable';
+              if (check?.description) li.dataset.tooltip = check.description;
+              li.textContent = `${label} — ${tag}`;
+            } else {
+              li.className = 'diff-item diff-pass';
+              if (check?.description) li.dataset.tooltip = check.description;
+              li.textContent = `${label} — via ${lb.baselineLb}`;
+            }
+            list.appendChild(li);
           }
 
           if (cat.skipped.length) {

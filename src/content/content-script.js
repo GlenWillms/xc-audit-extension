@@ -130,10 +130,32 @@
 
       const referencedObjects = await fetchReferencedObjects(lbConfigs, namespace, apiUrl, policies, defaultPolicies);
 
+      const baselineLbNames = new Set();
+      for (const lb of lbConfigs) {
+        const label = (lb.metadata?.labels || lb.labels || {})['xc-audit-baseline-lb'];
+        if (label) baselineLbNames.add(label);
+      }
+
+      const baselineLbConfigs = {};
+      let baselineLbReferencedObjects = { appFirewall: {}, servicePolicy: {} };
+      if (baselineLbNames.size > 0) {
+        await Promise.all([...baselineLbNames].map(async (name) => {
+          try {
+            const resp = await fetch(apiUrl(`/api/config/namespaces/default/http_loadbalancers/${name}`));
+            if (resp.ok) baselineLbConfigs[name] = await resp.json();
+          } catch {}
+        }));
+        const blbArray = Object.values(baselineLbConfigs);
+        if (blbArray.length > 0) {
+          baselineLbReferencedObjects = await fetchReferencedObjects(blbArray, 'default', apiUrl, defaultPolicies, null);
+        }
+      }
+
       chrome.runtime.sendMessage(
         {
           type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT',
           tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects,
+          baselineLbConfigs, baselineLbReferencedObjects,
         },
         (response) => {
           if (chrome.runtime.lastError) return;
@@ -339,6 +361,23 @@
           }
         }
 
+        if (cat.overrides?.length) {
+          for (const o of cat.overrides) {
+            const check = o.inspector
+              ? cat.checks?.find((c) => c.inspector === o.inspector)
+              : cat.checks?.find((c) => c.key === o.path?.split('.')[1]);
+            const label = check?.label || o.path || o.inspector;
+            const tooltip = check?.description || '';
+            const active = isActiveForPlan(o.plan || check?.plan || 'essentials', currentPlan, planCtx.addons, check?.key);
+            if (!active) {
+              const tag = planTagLabel(o.plan || check?.plan);
+              html += `<span class="xc-audit-unavailable-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — ${tag}</span>`;
+            } else {
+              html += `<span class="xc-audit-passed-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — via ${escapeHtml(result.baselineLb)}</span>`;
+            }
+          }
+        }
+
         if (cat.skipped.length) {
           for (const s of cat.skipped) {
             const check = cat.checks?.find((c) => c.key === s.key);
@@ -446,6 +485,14 @@
       });
 
       nameEl.insertAdjacentElement('afterend', badge);
+      if (result.baselineLb) {
+        const refTag = document.createElement('span');
+        refTag.className = 'xc-audit-info-tag';
+        refTag.style.marginLeft = '4px';
+        refTag.textContent = `ref: ${result.baselineLb}`;
+        refTag.title = `Audit overridden by baseline LB "${result.baselineLb}" in default namespace`;
+        badge.insertAdjacentElement('afterend', refTag);
+      }
     }
   }
 
