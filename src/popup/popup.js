@@ -215,7 +215,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const isActive = (checkPlan, checkKey) => {
         if (checkPlan === 'essentials') return true;
         if (checkPlan === 'enterprise') return plan === 'enterprise';
-        if (checkPlan === 'addon') return plan === 'enterprise' || addons.has(checkKey);
+        if (checkPlan === 'addon') return addons.has(checkKey);
         return false;
       };
       const activeDiffs = lb.diffs.filter((d) => isActive(d.plan || 'essentials', d.key));

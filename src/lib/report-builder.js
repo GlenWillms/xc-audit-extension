@@ -11,7 +11,7 @@ function fmt(val) {
 function isActiveForPlan(checkPlan, plan, addons, checkKey) {
   if (checkPlan === 'essentials') return true;
   if (checkPlan === 'enterprise') return plan === 'enterprise';
-  if (checkPlan === 'addon') return plan === 'enterprise' || addons?.includes(checkKey);
+  if (checkPlan === 'addon') return addons?.includes(checkKey);
   return false;
 }
 

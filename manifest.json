@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "F5 XC Namespace Audit",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Compliance audit overlay for F5 Distributed Cloud HTTP Load Balancers",
   "permissions": [
     "storage",

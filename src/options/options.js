@@ -140,13 +140,6 @@ function renderAddons(settings) {
 
   const isEnterprise = plan === 'enterprise';
 
-  if (isEnterprise) {
-    const hint = document.createElement('p');
-    hint.className = 'hint';
-    hint.textContent = 'All add-ons are included with the Enterprise plan.';
-    container.appendChild(hint);
-  }
-
   const addons = CHECK_CATEGORIES.flatMap((cat) =>
     cat.checks.filter((c) => c.plan === 'addon').map((c) => ({ ...c, category: cat.label }))
   );
@@ -156,8 +149,7 @@ function renderAddons(settings) {
     row.className = 'toggle-row';
     const toggle = document.createElement('input');
     toggle.type = 'checkbox';
-    toggle.checked = isEnterprise || enabledAddons.includes(addon.key);
-    toggle.disabled = isEnterprise;
+    toggle.checked = enabledAddons.includes(addon.key);
     toggle.dataset.addonKey = addon.key;
     const span = document.createElement('span');
     span.textContent = addon.label;
@@ -509,10 +501,8 @@ function bindEvents() {
     const plan = $('planSelect').value;
     const config = await getTenantConfig(selectedTenant);
     const update = { ...(config.settings || {}), plan };
-    if (plan !== 'enterprise') {
-      const addonToggles = $('addonsContainer').querySelectorAll('input[type="checkbox"]');
-      update.addons = [...addonToggles].filter((t) => t.checked).map((t) => t.dataset.addonKey);
-    }
+    const addonToggles = $('addonsContainer').querySelectorAll('input[type="checkbox"]');
+    update.addons = [...addonToggles].filter((t) => t.checked).map((t) => t.dataset.addonKey);
     delete update.autoAudit;
     await setTenantData('settings', update);
     showStatus('settingsStatus', 'Plan settings saved', 'success');

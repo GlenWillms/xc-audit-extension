@@ -1,8 +1,8 @@
-const XC_URL_PATTERN =
+var XC_URL_PATTERN =
   /^https:\/\/([^.]+)\.console\.ves\.volterra\.io\/(?:managed_tenant\/([^/]+)\/)?web\/workspaces\/([^/]+)\/(.+)/;
 
-const NAMESPACE_SEGMENT = /namespaces\/([^/]+)/;
-const LB_LIST_PATH = /manage\/load[_-]?balancers\/http[_-]?load[_-]?balancers\/?$/i;
+var NAMESPACE_SEGMENT = /namespaces\/([^/]+)/;
+var LB_LIST_PATH = /manage\/load[_-]?balancers\/http[_-]?load[_-]?balancers\/?$/i;
 
 function parseXcUrl(url) {
   const match = url.match(XC_URL_PATTERN);

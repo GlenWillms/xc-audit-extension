@@ -46,6 +46,16 @@ function buildCacheKey(compositeId, namespace) {
   return managedTenant ? `${tenant}/${managedTenant}/${namespace}` : `${tenant}/${namespace}`;
 }
 
+const XC_URL_RE = /^https:\/\/([^.]+)\.console\.ves\.volterra\.io\/(?:managed_tenant\/([^/]+)\/)?/;
+
+async function getXcTabTenant() {
+  const tabs = await chrome.tabs.query({ url: XC_TAB_PATTERN });
+  if (!tabs.length) return null;
+  const m = tabs[0].url?.match(XC_URL_RE);
+  if (!m) return null;
+  return { tenant: m[1], managedTenant: m[2] || null };
+}
+
 async function sendToXcTab(message) {
   const tabs = await chrome.tabs.query({ url: XC_TAB_PATTERN });
   if (!tabs.length) return { error: 'No XC console tab open. Open the XC console first.' };
@@ -69,8 +79,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('version').textContent = 'v' + chrome.runtime.getManifest().version;
 
   await initTenantSelector();
-  await loadNamespaces();
   bindEvents();
+  await loadNamespaces();
 });
 
 async function initTenantSelector() {
@@ -134,11 +144,19 @@ async function loadNamespaces() {
     }
   }
 
-  const { managedTenant: mt } = parseCompositeId(selectedTenant);
+  const { tenant: selectedParent, managedTenant: mt } = parseCompositeId(selectedTenant);
   let allNamespaces = null;
-  const listResp = await sendToXcTab({ type: 'LIST_NAMESPACES', managedTenant: mt });
-  if (listResp?.namespaces) {
-    allNamespaces = listResp.namespaces;
+  let listResp = null;
+  try {
+    const tabTenant = await getXcTabTenant();
+    if (tabTenant && tabTenant.tenant === selectedParent) {
+      listResp = await sendToXcTab({ type: 'LIST_NAMESPACES', managedTenant: mt });
+      if (listResp?.namespaces) allNamespaces = listResp.namespaces;
+    } else {
+      listResp = { error: tabTenant ? 'XC console is on a different tenant.' : 'No XC console tab open.' };
+    }
+  } catch {
+    listResp = { error: 'Could not reach the XC console tab.' };
   }
 
   if (allNamespaces) {
@@ -324,7 +342,7 @@ function bindEvents() {
       const { tenant: rawTenant, managedTenant: selectedMt } = parseCompositeId(selectedTenant);
       lastReportHtml = buildHtmlReport({
         tenant: selectedMt || rawTenant,
-        companyName: tenantMeta.companyName || null,
+        companyName: selectedMt || tenantMeta.companyName || null,
         logoDataUrl: tenantMeta.logoDataUrl || null,
         namespaces: reportNamespaces,
         checkCategories: catResp,

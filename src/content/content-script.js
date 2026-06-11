@@ -68,6 +68,25 @@
         checkPage();
       }
     }, 1000);
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'session' || !changes.auditCache) return;
+      const parsed = parseXcUrl(location.href);
+      if (!parsed || !parsed.isLbListPage) return;
+      const mt = parsed.managedTenant || currentManagedTenant;
+      const cacheKey = mt
+        ? `${parsed.tenant}/${mt}/${parsed.namespace}`
+        : `${parsed.tenant}/${parsed.namespace}`;
+      const entry = changes.auditCache.newValue?.[cacheKey];
+      if (entry) {
+        const lbs = entry.loadBalancers || {};
+        auditResults = {
+          policies: entry.policies,
+          loadBalancers: Object.values(lbs).map((e) => e.result),
+        };
+        observeAndInject();
+      }
+    });
   }
 
   function checkPage(force) {
@@ -106,12 +125,16 @@
       return `${apiPrefix}${path}?report_fields&csrf=${csrf}`;
     }
 
-    const tenantMetaKey = `tenant:${tenant}:meta`;
+    const tid = managedTenant ? `${tenant}::${managedTenant}` : tenant;
+    const tenantMetaKey = `tenant:${tid}:meta`;
     const tenantMetaCache = await chrome.storage.local.get(tenantMetaKey);
     let tenantMeta = tenantMetaCache[tenantMetaKey] || null;
     if (!tenantMeta) {
       tenantMeta = await fetchTenantMeta(csrf, managedTenant);
     }
+    const domLogo = extractLogo();
+    if (domLogo) tenantMeta = { ...tenantMeta, logoDataUrl: domLogo };
+    if (managedTenant) tenantMeta = { ...tenantMeta, companyName: managedTenant };
 
     const [policies, defaultPolicies, lbListResp] = await Promise.all([
       fetch(apiUrl(`/api/config/namespaces/${namespace}/active_service_policies`))
@@ -189,44 +212,108 @@
       currentManagedTenant = managedTenant;
       showLoadingBadges();
 
-      if (!force) {
-        const csrf = await getCsrf();
-        if (!csrf) { clearLoading(); return; }
-        const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
-        const lbListResp = await fetch(`${apiPrefix}/api/config/namespaces/${namespace}/http_loadbalancers?report_fields&csrf=${csrf}`);
-        if (!lbListResp.ok) throw new Error(`API ${lbListResp.status}`);
-        const lbList = (await lbListResp.json()).items || [];
-        const lbVersions = lbList.map((lb) => ({
-          name: lb.name,
-          version: lb.resource_version || lb.metadata?.resource_version || null,
-        }));
+      const csrf = await getCsrf();
+      if (!csrf) { clearLoading(); return; }
 
+      const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
+
+      function apiUrl(path) {
+        return `${apiPrefix}${path}?report_fields&csrf=${csrf}`;
+      }
+
+      const tenantMetaKey = `tenant:${managedTenant ? `${tenant}::${managedTenant}` : tenant}:meta`;
+      const tenantMetaCache = await chrome.storage.local.get(tenantMetaKey);
+      let tenantMeta = tenantMetaCache[tenantMetaKey] || null;
+      if (!tenantMeta) {
+        tenantMeta = await fetchTenantMeta(csrf, managedTenant);
+      }
+      const domLogo = extractLogo();
+      if (domLogo) tenantMeta = { ...tenantMeta, logoDataUrl: domLogo };
+      if (managedTenant) tenantMeta = { ...tenantMeta, companyName: managedTenant };
+
+      const [policies, defaultPolicies, lbListResp] = await Promise.all([
+        fetch(apiUrl(`/api/config/namespaces/${namespace}/active_service_policies`))
+          .then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(apiUrl(`/api/config/namespaces/default/active_service_policies`))
+          .then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(apiUrl(`/api/config/namespaces/${namespace}/http_loadbalancers`)),
+      ]);
+
+      if (!lbListResp.ok) throw new Error(`API ${lbListResp.status}`);
+      const lbList = (await lbListResp.json()).items || [];
+
+      const lbVersions = lbList.map((lb) => ({
+        name: lb.name,
+        version: lb.resource_version || lb.metadata?.resource_version || null,
+      }));
+
+      let staleLbs = lbVersions.map((v) => v.name);
+      let freshResults = {};
+
+      if (!force) {
         const check = await chrome.runtime.sendMessage({
           type: 'CHECK_VERSIONS', tenant, namespace, managedTenant, lbVersions,
         });
-        if (check && check.stale.length === 0) {
-          const { auditCache } = await chrome.storage.session.get('auditCache');
-          const cacheKey = managedTenant ? `${tenant}/${managedTenant}/${namespace}` : `${tenant}/${namespace}`;
-          const cached = auditCache?.[cacheKey];
-          if (cached) {
-            const lbs = cached.loadBalancers || {};
-            auditResults = {
-              policies: cached.policies,
-              loadBalancers: Object.values(lbs).map((e) => e.result),
-            };
-            observeAndInject();
-            return;
-          }
+        if (check?.stale) {
+          staleLbs = check.stale;
+          freshResults = check.fresh || {};
         }
       }
 
-      const response = await auditNamespace(namespace);
-      if (response?.type === 'AUDIT_RESULTS') {
-        auditResults = response.data;
-        observeAndInject();
-      } else {
-        clearLoading();
+      const lbConfigs = (
+        await Promise.all(
+          staleLbs.map((name) =>
+            fetch(apiUrl(`/api/config/namespaces/${namespace}/http_loadbalancers/${name}`))
+              .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+          )
+        )
+      ).filter(Boolean);
+
+      const referencedObjects = await fetchReferencedObjects(lbConfigs, namespace, apiUrl, policies, defaultPolicies);
+
+      const baselineLbNames = new Set();
+      for (const lb of lbConfigs) {
+        const label = (lb.metadata?.labels || lb.labels || {})['xc-audit-baseline-lb'];
+        if (label) baselineLbNames.add(label);
       }
+
+      const baselineLbConfigs = {};
+      let baselineLbReferencedObjects = { appFirewall: {}, servicePolicy: {} };
+      if (baselineLbNames.size > 0) {
+        await Promise.all([...baselineLbNames].map(async (name) => {
+          try {
+            const resp = await fetch(apiUrl(`/api/config/namespaces/default/http_loadbalancers/${name}`));
+            if (resp.ok) baselineLbConfigs[name] = await resp.json();
+          } catch {}
+        }));
+        const blbArray = Object.values(baselineLbConfigs);
+        if (blbArray.length > 0) {
+          baselineLbReferencedObjects = await fetchReferencedObjects(blbArray, 'default', apiUrl, defaultPolicies, null);
+        }
+      }
+
+      chrome.runtime.sendMessage(
+        {
+          type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT',
+          tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects,
+          baselineLbConfigs, baselineLbReferencedObjects, tenantMeta,
+        },
+        (response) => {
+          if (chrome.runtime.lastError) { clearLoading(); return; }
+          if (response?.type === 'AUDIT_RESULTS') {
+            const data = response.data;
+            for (const [name, result] of Object.entries(freshResults)) {
+              if (!data.loadBalancers.find((lb) => lb.name === name)) {
+                data.loadBalancers.push(result);
+              }
+            }
+            auditResults = data;
+            observeAndInject();
+          } else {
+            clearLoading();
+          }
+        }
+      );
     } catch (err) {
       clearLoading();
       if (err.message?.includes('401') || err.message?.includes('403')) {
@@ -343,16 +430,34 @@
     }
   }
 
+  let badgeObserver = null;
+  let retryTimer = null;
+
   function observeAndInject() {
     if (loadingObserver) { loadingObserver.disconnect(); loadingObserver = null; }
+    if (badgeObserver) { badgeObserver.disconnect(); badgeObserver = null; }
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     document.querySelectorAll('.xc-audit-loading').forEach((el) => el.remove());
     injectBadges();
 
-    const contentArea = document.querySelector('[class*="content"]') || document.body;
-    new MutationObserver(() => {
+    badgeObserver = new MutationObserver(() => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(injectBadges, 200);
-    }).observe(contentArea, { childList: true, subtree: true });
+    });
+    badgeObserver.observe(document.body, { childList: true, subtree: true });
+
+    let retries = 0;
+    function retryInject() {
+      if (!auditResults?.loadBalancers?.length) return;
+      const rows = findLbRows();
+      const injected = rows.some((r) => r.wrapper.querySelector('.xc-audit-badge:not(.xc-audit-loading)'));
+      if (!injected && retries < 15) {
+        retries++;
+        injectBadges();
+        retryTimer = setTimeout(retryInject, 500);
+      }
+    }
+    retryTimer = setTimeout(retryInject, 300);
   }
 
   function findLbRows() {
@@ -383,7 +488,7 @@
   function isActiveForPlan(checkPlan, currentPlan, addons, checkKey) {
     if (checkPlan === 'essentials') return true;
     if (checkPlan === 'enterprise') return currentPlan === 'enterprise';
-    if (checkPlan === 'addon') return currentPlan === 'enterprise' || addons?.includes(checkKey);
+    if (checkPlan === 'addon') return addons?.includes(checkKey);
     return false;
   }
 
@@ -608,25 +713,25 @@
     document.body.prepend(banner);
   }
 
+  function extractLogo() {
+    const customLogo = document.querySelector('img[ves-e2e-test="logo-custom-img"]');
+    if (customLogo?.src?.startsWith('data:image')) return customLogo.src;
+    const imgs = document.querySelectorAll('img[src^="data:image"]');
+    for (const img of imgs) {
+      if (img.closest('[class*="sidebar"], [class*="header"], [class*="nav"], [class*="logo"], [class*="brand"]')) {
+        return img.src;
+      }
+    }
+    return imgs.length ? imgs[0].src : null;
+  }
+
   async function fetchTenantMeta(csrf, managedTenant) {
     try {
       const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
       const resp = await fetch(`${apiPrefix}/api/web/namespaces/system/tenant/settings?csrf=${csrf}`);
       if (!resp.ok) return {};
       const data = await resp.json();
-      const companyName = data.company_name || null;
-
-      let logoDataUrl = null;
-      const imgs = document.querySelectorAll('img[src^="data:image"]');
-      for (const img of imgs) {
-        if (img.closest('[class*="sidebar"], [class*="header"], [class*="nav"], [class*="logo"], [class*="brand"]')) {
-          logoDataUrl = img.src;
-          break;
-        }
-      }
-      if (!logoDataUrl && imgs.length) logoDataUrl = imgs[0].src;
-
-      return { companyName, logoDataUrl };
+      return { companyName: managedTenant || data.company_name || null, logoDataUrl: extractLogo() };
     } catch {
       return {};
     }
@@ -770,6 +875,8 @@
 
   function removeAllBadges() {
     if (loadingObserver) { loadingObserver.disconnect(); loadingObserver = null; }
+    if (badgeObserver) { badgeObserver.disconnect(); badgeObserver = null; }
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     document.querySelectorAll('.xc-audit-badge, .xc-audit-detail-row, .xc-audit-setup-banner').forEach((el) => el.remove());
     auditResults = null;
   }

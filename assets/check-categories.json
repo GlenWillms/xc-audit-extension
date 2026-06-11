@@ -1,5 +1,25 @@
 [
   {
+    "id": "policy",
+    "label": "Service Policies",
+    "checks": [
+      {
+        "key": "service_policies_from_namespace",
+        "label": "Service Policies (from namespace)",
+        "description": "Service policies from the namespace apply centrally managed rules (geo-fencing, IP block lists) to all load balancers.",
+        "code": "ignore-sp",
+        "plan": "essentials"
+      },
+      {
+        "key": "default_sensitive_data_policy",
+        "label": "Sensitive Data Policy",
+        "description": "Sensitive Data Policy masks or blocks exposure of PII, credentials, and other sensitive data in responses.",
+        "code": "ignore-sdp",
+        "plan": "enterprise"
+      }
+    ]
+  },
+  {
     "id": "transport",
     "label": "Core Security (Transport)",
     "checks": [
@@ -38,6 +58,26 @@
         "description": "Service policies must block traffic from specific countries or regions as defined in the baseline.",
         "code": "ignore-geo",
         "inspector": "geoPolicy",
+        "plan": "essentials"
+      }
+    ]
+  },
+  {
+    "id": "ddos",
+    "label": "DDoS Protection",
+    "checks": [
+      {
+        "key": "ddos_mitigation_rules",
+        "label": "DDoS Mitigation Rules",
+        "description": "DDoS mitigation rules define thresholds and actions for volumetric attack protection.",
+        "code": "ignore-ddos",
+        "plan": "essentials"
+      },
+      {
+        "key": "l7_ddos_protection",
+        "label": "L7 DDoS Protection",
+        "description": "Layer 7 DDoS protection detects and mitigates application-layer flood attacks using request rate analysis.",
+        "code": "ignore-ddos",
         "plan": "essentials"
       }
     ]
@@ -89,48 +129,6 @@
     ]
   },
   {
-    "id": "ddos",
-    "label": "DDoS Protection",
-    "checks": [
-      {
-        "key": "ddos_mitigation_rules",
-        "label": "DDoS Mitigation Rules",
-        "description": "DDoS mitigation rules define thresholds and actions for volumetric attack protection.",
-        "code": "ignore-ddos",
-        "plan": "essentials"
-      },
-      {
-        "key": "l7_ddos_protection",
-        "label": "L7 DDoS Protection",
-        "description": "Layer 7 DDoS protection detects and mitigates application-layer flood attacks using request rate analysis.",
-        "code": "ignore-ddos",
-        "plan": "essentials"
-      }
-    ]
-  },
-  {
-    "id": "bot",
-    "label": "Bot Defense",
-    "checks": [
-      {
-        "key": "disable_bot_defense",
-        "label": "Bot Defense",
-        "description": "Bot Defense uses JavaScript and API signals to detect and block automated threats like credential stuffing and scraping.",
-        "code": "ignore-bot",
-        "required": false,
-        "plan": "addon"
-      },
-      {
-        "key": "disable_client_side_defense",
-        "label": "Client-Side Defense",
-        "description": "Client-Side Defense detects and blocks malicious scripts injected into web pages (Magecart, formjacking).",
-        "code": "ignore-csd",
-        "required": false,
-        "plan": "addon"
-      }
-    ]
-  },
-  {
     "id": "api",
     "label": "API Security",
     "checks": [
@@ -158,22 +156,24 @@
     ]
   },
   {
-    "id": "policy",
-    "label": "Policy & Data",
+    "id": "bot",
+    "label": "Bot Defense",
     "checks": [
       {
-        "key": "service_policies_from_namespace",
-        "label": "Service Policies (from namespace)",
-        "description": "Service policies from the namespace apply centrally managed rules (geo-fencing, IP block lists) to all load balancers.",
-        "code": "ignore-sp",
-        "plan": "essentials"
+        "key": "disable_bot_defense",
+        "label": "Bot Defense",
+        "description": "Bot Defense uses JavaScript and API signals to detect and block automated threats like credential stuffing and scraping.",
+        "code": "ignore-bot",
+        "required": false,
+        "plan": "addon"
       },
       {
-        "key": "default_sensitive_data_policy",
-        "label": "Sensitive Data Policy",
-        "description": "Sensitive Data Policy masks or blocks exposure of PII, credentials, and other sensitive data in responses.",
-        "code": "ignore-sdp",
-        "plan": "enterprise"
+        "key": "disable_client_side_defense",
+        "label": "Client-Side Defense",
+        "description": "Client-Side Defense detects and blocks malicious scripts injected into web pages (Magecart, formjacking).",
+        "code": "ignore-csd",
+        "required": false,
+        "plan": "addon"
       }
     ]
   }

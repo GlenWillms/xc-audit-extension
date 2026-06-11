@@ -136,13 +136,19 @@ function tenantKey(tenant, key) {
   return `tenant:${tenant}:${key}`;
 }
 
-async function getTenantConfig(tenant) {
+async function getTenantConfig(tid) {
   const keys = ['baseline', 'explanations', 'exemptionMap', 'settings', 'policyOverrides'];
-  const allKeys = [...keys.map((k) => tenantKey(tenant, k)), ...keys];
+  const parts = tid.split('::');
+  const parent = parts.length > 1 ? parts[0] : null;
+  const allKeys = [...keys.map((k) => tenantKey(tid, k))];
+  if (parent) allKeys.push(...keys.map((k) => tenantKey(parent, k)));
+  allKeys.push(...keys);
   const data = await chrome.storage.local.get(allKeys);
   const result = {};
   for (const k of keys) {
-    result[k] = data[tenantKey(tenant, k)] ?? data[k];
+    result[k] = data[tenantKey(tid, k)]
+      ?? (parent ? data[tenantKey(parent, k)] : undefined)
+      ?? data[k];
   }
   return result;
 }
@@ -194,15 +200,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === 'CHECK_VERSIONS') {
-    handleCheckVersions(message).then(sendResponse);
+    handleCheckVersions(message).then(sendResponse).catch((err) => sendResponse({ error: err.message }));
     return true;
   }
   if (message.type === 'RUN_AUDIT') {
-    handleRunAudit(message, false).then(sendResponse);
+    handleRunAudit(message, false).then(sendResponse).catch((err) => sendResponse({ type: 'AUDIT_ERROR', error: err.message }));
     return true;
   }
   if (message.type === 'FORCE_RUN_AUDIT') {
-    handleRunAudit(message, true).then(sendResponse);
+    handleRunAudit(message, true).then(sendResponse).catch((err) => sendResponse({ type: 'AUDIT_ERROR', error: err.message }));
     return true;
   }
   if (message.type === 'OPEN_OPTIONS') {
@@ -215,7 +221,8 @@ function buildCacheKey(tenant, namespace, managedTenant) {
 }
 
 async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersions }) {
-  const { baseline, exemptionMap } = await getTenantConfig(tenant);
+  const tid = compositeId(tenant, managedTenant);
+  const { baseline, exemptionMap } = await getTenantConfig(tid);
   const currentHash = await hashJson({ baseline, exemptionMap });
 
   const cacheKey = buildCacheKey(tenant, namespace, managedTenant);
@@ -285,7 +292,7 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
     function isActiveForPlan(checkPlan, checkKey) {
       if (checkPlan === 'essentials') return true;
       if (checkPlan === 'enterprise') return plan === 'enterprise';
-      if (checkPlan === 'addon') return plan === 'enterprise' || enabledAddons.has(checkKey);
+      if (checkPlan === 'addon') return enabledAddons.has(checkKey);
       return false;
     }
 

@@ -81,10 +81,11 @@ Checks outside the tenant's plan are grayed out, not flagged as failures.
 
 Each LB on the list page gets a badge:
 
+- **Auditing...** -- pulsing gray badge while the audit is in progress
 - **PASS (11 passed, 1 skipped)** -- green badge, all active checks passed
 - **WARNING (2 warnings, 9 passed)** -- red badge, issues found
 
-Click the badge to expand a detail row with categorized findings.
+Click a badge to expand a detail row with categorized findings.
 
 ---
 
@@ -194,23 +195,38 @@ Per-namespace overrides available if a namespace intentionally differs.
 
 ## HTML Tenant Report
 
-Generate a downloadable report covering all audited namespaces in a tenant.
+Generate a downloadable report covering **all namespaces** in a tenant -- not just the ones you've visited.
 
-1. Visit namespace LB list pages to collect audit data
-2. Click **Report** in the popup
-3. Select namespaces to include, click **Generate Report**
-4. Preview the report, then **Download HTML**
+1. Click **Report** in the popup
+2. The extension discovers all namespaces via the XC API
+3. Select which namespaces to include (all selected by default)
+4. Click **Generate Report** -- unaudited namespaces are audited automatically
+5. Preview the report, then **Download HTML**
+
+A progress bar tracks auditing. If the namespace count is large (>25 or >2x already audited), the extension prompts for confirmation first.
 
 ---
 
 ## Report Contents
 
-- **Tenant branding** -- logo and company name fetched from the XC tenant settings API
+- **Tenant branding** -- logo and company name from the active tenant (parent or managed)
 - **Executive summary** -- compliance %, LB pass/warning counts, per-category breakdown
 - **Per-namespace sections** -- service policy status + categorized LB findings
 - **Recommendations** -- aggregated, deduplicated, sorted by severity then frequency, with remediation steps
 
 Self-contained HTML with no external dependencies. Prints cleanly.
+
+---
+
+## Managed Tenant Support
+
+Access child tenants through a parent tenant with full support:
+
+- **Independent identity** -- each managed tenant appears as a separate entry in the tenant selector
+- **Own settings** -- baselines, exemptions, and policy overrides per managed tenant (inherits from parent by default)
+- **Correct branding** -- reports use the managed tenant's logo and name, not the parent's
+- **Namespace discovery** -- the report page lists namespaces for the selected managed tenant
+- **Automatic detection** -- the popup auto-selects the active tenant (parent or managed) when opening Settings or Report
 
 ---
 
@@ -276,7 +292,8 @@ No build step, no dependencies, no API keys.
 | Baseline LB override | Reference LB in default namespace |
 | Plan tier awareness | Essentials / Enterprise / Add-on |
 | Policy comparison | Auto-compare against default namespace |
-| Tenant-wide HTML report | Executive summary + recommendations |
+| Tenant-wide HTML report | Auto-audits all namespaces with recommendations |
+| Managed tenant support | Independent settings and branding per child tenant |
 | Zero configuration auth | Uses browser session |
 | Efficient | Version-based caching |
 
