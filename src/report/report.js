@@ -8,35 +8,41 @@ let namespaceEntries = [];
 let cachedKeys = new Set();
 let lastReportHtml = null;
 
-function tenantKey(tenant, key) {
-  return `tenant:${tenant}:${key}`;
+function parseCompositeId(id) {
+  const parts = (id || '').split('::');
+  return { tenant: parts[0], managedTenant: parts[1] || null };
 }
 
-async function getTenantConfig(tenant) {
+function tenantKey(id, key) {
+  return `tenant:${id}:${key}`;
+}
+
+async function getTenantConfig(id) {
   const keys = ['baseline', 'explanations', 'exemptionMap', 'settings'];
-  if (!tenant) {
+  if (!id) {
     const data = await chrome.storage.local.get(keys);
     return Object.fromEntries(keys.map((k) => [k, data[k]]));
   }
-  const allKeys = [...keys.map((k) => tenantKey(tenant, k)), ...keys];
+  const allKeys = [...keys.map((k) => tenantKey(id, k)), ...keys];
   const data = await chrome.storage.local.get(allKeys);
   const result = {};
   for (const k of keys) {
-    result[k] = data[tenantKey(tenant, k)] ?? data[k];
+    result[k] = data[tenantKey(id, k)] ?? data[k];
   }
   return result;
 }
 
-function parseCacheKey(key, tenant) {
-  if (!key.startsWith(tenant + '/')) return null;
-  const rest = key.slice(tenant.length + 1);
-  const parts = rest.split('/');
-  if (parts.length === 1) return { namespace: parts[0], managedTenant: null };
-  if (parts.length === 2) return { managedTenant: parts[0], namespace: parts[1] };
-  return null;
+function parseCacheKey(key, compositeId) {
+  const { tenant, managedTenant } = parseCompositeId(compositeId);
+  const prefix = managedTenant ? `${tenant}/${managedTenant}/` : `${tenant}/`;
+  if (!key.startsWith(prefix)) return null;
+  const namespace = key.slice(prefix.length);
+  if (namespace.includes('/')) return null;
+  return { namespace, managedTenant };
 }
 
-function buildCacheKey(tenant, namespace, managedTenant) {
+function buildCacheKey(compositeId, namespace) {
+  const { tenant, managedTenant } = parseCompositeId(compositeId);
   return managedTenant ? `${tenant}/${managedTenant}/${namespace}` : `${tenant}/${namespace}`;
 }
 
@@ -84,7 +90,8 @@ async function initTenantSelector() {
   for (const t of knownTenants) {
     const opt = document.createElement('option');
     opt.value = t;
-    opt.textContent = t;
+    const { tenant, managedTenant } = parseCompositeId(t);
+    opt.textContent = managedTenant ? `${tenant} > ${managedTenant}` : t;
     select.appendChild(opt);
   }
 
@@ -127,8 +134,9 @@ async function loadNamespaces() {
     }
   }
 
+  const { managedTenant: mt } = parseCompositeId(selectedTenant);
   let allNamespaces = null;
-  const listResp = await sendToXcTab({ type: 'LIST_NAMESPACES' });
+  const listResp = await sendToXcTab({ type: 'LIST_NAMESPACES', managedTenant: mt });
   if (listResp?.namespaces) {
     allNamespaces = listResp.namespaces;
   }
@@ -137,9 +145,9 @@ async function loadNamespaces() {
     for (const ns of allNamespaces) {
       if (!cachedNamespaces.has(ns)) {
         namespaceEntries.push({
-          cacheKey: buildCacheKey(selectedTenant, ns, null),
+          cacheKey: buildCacheKey(selectedTenant, ns),
           namespace: ns,
-          managedTenant: null,
+          managedTenant: mt,
           cached: false,
         });
       }
@@ -183,6 +191,7 @@ async function loadNamespaces() {
     cb.dataset.namespace = ns.namespace;
     cb.dataset.cacheKey = ns.cacheKey;
     cb.dataset.cached = ns.cached ? '1' : '0';
+    cb.dataset.managedTenant = ns.managedTenant || '';
 
     const nameSpan = document.createElement('span');
     nameSpan.textContent = ns.managedTenant ? `${ns.namespace} (${ns.managedTenant})` : ns.namespace;
@@ -208,6 +217,7 @@ function getSelectedEntries() {
         namespace: cb.dataset.namespace,
         cacheKey: cb.dataset.cacheKey,
         cached: cb.dataset.cached === '1',
+        managedTenant: cb.dataset.managedTenant || null,
       });
     }
   }
@@ -270,7 +280,7 @@ function bindEvents() {
           const ns = needsAudit[i];
           showProgress(`Auditing ${ns.namespace} (${i + 1} of ${needsAudit.length})...`, ((i) / needsAudit.length) * 100);
           try {
-            await sendToXcTab({ type: 'AUDIT_NAMESPACE', namespace: ns.namespace });
+            await sendToXcTab({ type: 'AUDIT_NAMESPACE', namespace: ns.namespace, managedTenant: ns.managedTenant });
           } catch {}
           if (i < needsAudit.length - 1) await delay(200);
         }
@@ -290,13 +300,13 @@ function bindEvents() {
 
       const reportNamespaces = [];
       for (const entry of selected) {
-        const cacheKey = buildCacheKey(selectedTenant, entry.namespace, null);
+        const cacheKey = buildCacheKey(selectedTenant, entry.namespace);
         const cached = auditCache?.[cacheKey];
         if (!cached) continue;
         const lbs = cached.loadBalancers || {};
         reportNamespaces.push({
           name: entry.namespace,
-          managedTenant: null,
+          managedTenant: entry.managedTenant,
           policies: cached.policies || null,
           loadBalancers: Object.entries(lbs).map(([name, e]) => ({ name, result: e.result })),
         });
@@ -311,8 +321,9 @@ function bindEvents() {
       }
 
       const timeStr = new Date().toLocaleString();
+      const { tenant: rawTenant, managedTenant: selectedMt } = parseCompositeId(selectedTenant);
       lastReportHtml = buildHtmlReport({
-        tenant: selectedTenant,
+        tenant: selectedMt || rawTenant,
         companyName: tenantMeta.companyName || null,
         logoDataUrl: tenantMeta.logoDataUrl || null,
         namespaces: reportNamespaces,
@@ -340,7 +351,9 @@ function bindEvents() {
     const a = document.createElement('a');
     const dateStr = new Date().toISOString().split('T')[0];
     a.href = url;
-    a.download = `xc-audit-${selectedTenant}-${dateStr}.html`;
+    const { tenant: dlTenant, managedTenant: dlMt } = parseCompositeId(selectedTenant);
+    const dlName = dlMt ? `${dlTenant}-${dlMt}` : dlTenant;
+    a.download = `xc-audit-${dlName}-${dateStr}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

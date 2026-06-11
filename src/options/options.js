@@ -4,8 +4,15 @@ const XC_TAB_PATTERN = 'https://*.console.ves.volterra.io/*';
 
 let selectedTenant = null;
 
-function shortTenantName(tenant) {
-  if (!tenant) return '';
+function parseCompositeId(id) {
+  const parts = (id || '').split('::');
+  return { tenant: parts[0], managedTenant: parts[1] || null };
+}
+
+function shortTenantName(id) {
+  if (!id) return '';
+  const { tenant, managedTenant } = parseCompositeId(id);
+  if (managedTenant) return managedTenant;
   const parts = tenant.split('-');
   return parts.length > 1 ? parts.slice(0, -1).join('-') : tenant;
 }
@@ -93,7 +100,8 @@ async function initTenantSelector() {
   for (const t of knownTenants) {
     const opt = document.createElement('option');
     opt.value = t;
-    opt.textContent = t;
+    const { tenant, managedTenant } = parseCompositeId(t);
+    opt.textContent = managedTenant ? `${tenant} > ${managedTenant}` : t;
     select.appendChild(opt);
   }
 

@@ -2,9 +2,9 @@
 
 Parked ideas for future consideration. Not committed to — just captured so they don't get lost.
 
-## Managed Tenant Support
+## ~~Parent vs Child Tenant Awareness~~ ✅ Implemented
 
-Support auditing LBs accessed through a parent/management tenant. The extension already captures managed tenant paths from network traffic (`/managed_tenant/CHILD/`), but the API calls and caching don't fully account for the managed tenant prefix yet.
+Managed (child) tenants are now tracked as composite IDs (`parent::child`) throughout the extension. The tenant selector shows `parent > child` entries, each with independent settings, baselines, and branding. Reports and namespace discovery use the correct `/managed_tenant/{child}/` API prefix.
 
 ## ~~Baseline Templates from Default Namespace LBs~~ ✅ Implemented
 

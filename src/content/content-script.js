@@ -33,12 +33,13 @@
         return true;
       }
       if (message.type === 'LIST_NAMESPACES') {
-        listNamespaces()
+        listNamespaces(message.managedTenant)
           .then(sendResponse)
           .catch((err) => sendResponse({ error: err.message }));
         return true;
       }
       if (message.type === 'AUDIT_NAMESPACE') {
+        if (message.managedTenant !== undefined) currentManagedTenant = message.managedTenant;
         auditNamespace(message.namespace)
           .then(sendResponse)
           .catch((err) => sendResponse({ error: err.message }));
@@ -225,11 +226,12 @@
     }
   }
 
-  async function listNamespaces() {
+  async function listNamespaces(managedTenant) {
+    const mt = managedTenant !== undefined ? managedTenant : currentManagedTenant;
     const csrf = await getCsrf();
     if (!csrf) return { error: 'No CSRF token' };
     try {
-      const apiPrefix = currentManagedTenant ? `/managed_tenant/${currentManagedTenant}` : '';
+      const apiPrefix = mt ? `/managed_tenant/${mt}` : '';
       const resp = await fetch(`${apiPrefix}/api/web/namespaces?csrf=${csrf}`);
       if (!resp.ok) return { error: `API ${resp.status}` };
       const data = await resp.json();

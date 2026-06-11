@@ -16,15 +16,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url || '';
 
-  const activeTenant = url.match(/^https:\/\/([^.]+)\.console\.ves\.volterra\.io\//)?.[1] || null;
+  const urlMatch = url.match(/^https:\/\/([^.]+)\.console\.ves\.volterra\.io\/(?:managed_tenant\/([^/]+)\/)?/);
+  const activeTenant = urlMatch?.[1] || null;
+  const activeMt = urlMatch?.[2] || null;
+  const activeId = activeTenant && activeMt ? `${activeTenant}::${activeMt}` : activeTenant;
 
   document.getElementById('openOptions').addEventListener('click', async () => {
-    if (activeTenant) await chrome.storage.local.set({ lastSelectedTenant: activeTenant });
+    if (activeId) await chrome.storage.local.set({ lastSelectedTenant: activeId });
     chrome.runtime.openOptionsPage();
   });
 
   document.getElementById('openReport').addEventListener('click', async () => {
-    if (activeTenant) await chrome.storage.local.set({ lastSelectedTenant: activeTenant });
+    if (activeId) await chrome.storage.local.set({ lastSelectedTenant: activeId });
     chrome.tabs.create({ url: chrome.runtime.getURL('src/report/report.html') });
   });
   const match = url.match(XC_URL_PATTERN);
@@ -39,6 +42,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const nsMatch = match[4].match(NAMESPACE_SEGMENT);
   const tenant = match[1];
   const managedTenant = match[2] || null;
+  const tid = managedTenant ? `${tenant}::${managedTenant}` : tenant;
   const namespace = nsMatch ? nsMatch[1] : match[3];
 
   if (managedTenant) {
@@ -157,7 +161,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (resp?.policies) {
             await chrome.runtime.sendMessage({
               type: 'SAVE_POLICY_OVERRIDE',
-              tenant,
+              tenant: tid,
               namespace,
               policies: resp.policies,
             });
@@ -173,7 +177,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       btnRow.appendChild(setBaselineBtn);
 
-      const poKey = `tenant:${tenant}:policyOverrides`;
+      const poKey = `tenant:${tid}:policyOverrides`;
       const poData = await chrome.storage.local.get([poKey, 'policyOverrides']);
       const policyOverrides = poData[poKey] ?? poData.policyOverrides;
       if (policyOverrides?.[namespace]) {
@@ -182,7 +186,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         clearBtn.textContent = 'Clear override (use default)';
         clearBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          await chrome.runtime.sendMessage({ type: 'CLEAR_POLICY_OVERRIDE', tenant, namespace });
+          await chrome.runtime.sendMessage({ type: 'CLEAR_POLICY_OVERRIDE', tenant: tid, namespace });
           await chrome.runtime.sendMessage({ type: 'CLEAR_CACHE' });
           clearBtn.textContent = 'Cleared — re-audit';
           clearBtn.disabled = true;

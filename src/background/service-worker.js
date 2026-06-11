@@ -147,10 +147,15 @@ async function getTenantConfig(tenant) {
   return result;
 }
 
-async function trackTenant(tenant) {
+function compositeId(tenant, managedTenant) {
+  return managedTenant ? `${tenant}::${managedTenant}` : tenant;
+}
+
+async function trackTenant(tenant, managedTenant) {
+  const id = compositeId(tenant, managedTenant);
   const { knownTenants = [] } = await chrome.storage.local.get('knownTenants');
-  if (!knownTenants.includes(tenant)) {
-    await chrome.storage.local.set({ knownTenants: [...knownTenants, tenant] });
+  if (!knownTenants.includes(id)) {
+    await chrome.storage.local.set({ knownTenants: [...knownTenants, id] });
   }
 }
 
@@ -237,11 +242,12 @@ async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersion
 }
 
 async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects, baselineLbConfigs, baselineLbReferencedObjects, tenantMeta }, forceRefresh) {
-  await trackTenant(tenant);
+  const tid = compositeId(tenant, managedTenant);
+  await trackTenant(tenant, managedTenant);
   if (tenantMeta && Object.keys(tenantMeta).length) {
-    await chrome.storage.local.set({ [tenantKey(tenant, 'meta')]: tenantMeta });
+    await chrome.storage.local.set({ [tenantKey(tid, 'meta')]: tenantMeta });
   }
-  const { baseline, explanations, exemptionMap, policyOverrides, settings } = await getTenantConfig(tenant);
+  const { baseline, explanations, exemptionMap, policyOverrides, settings } = await getTenantConfig(tid);
 
   if (!baseline) {
     return { type: 'AUDIT_ERROR', error: 'INVALID_BASELINE', message: 'No baseline configured.' };
