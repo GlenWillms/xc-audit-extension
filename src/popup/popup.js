@@ -149,6 +149,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (resp?.policies) {
             await chrome.runtime.sendMessage({
               type: 'SAVE_POLICY_OVERRIDE',
+              tenant,
               namespace,
               policies: resp.policies,
             });
@@ -164,14 +165,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       btnRow.appendChild(setBaselineBtn);
 
-      const { policyOverrides } = await chrome.storage.local.get('policyOverrides');
+      const poKey = `tenant:${tenant}:policyOverrides`;
+      const poData = await chrome.storage.local.get([poKey, 'policyOverrides']);
+      const policyOverrides = poData[poKey] ?? poData.policyOverrides;
       if (policyOverrides?.[namespace]) {
         const clearBtn = document.createElement('button');
         clearBtn.className = 'btn btn-sm btn-secondary';
         clearBtn.textContent = 'Clear override (use default)';
         clearBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          await chrome.runtime.sendMessage({ type: 'CLEAR_POLICY_OVERRIDE', namespace });
+          await chrome.runtime.sendMessage({ type: 'CLEAR_POLICY_OVERRIDE', tenant, namespace });
           await chrome.runtime.sendMessage({ type: 'CLEAR_CACHE' });
           clearBtn.textContent = 'Cleared — re-audit';
           clearBtn.disabled = true;
@@ -195,50 +198,183 @@ document.addEventListener('DOMContentLoaded', async () => {
       const lbEl = document.createElement('details');
       lbEl.className = `lb-detail ${lb.pass ? 'lb-pass' : 'lb-fail'}`;
 
+      const plan = lb.plan || 'essentials';
+      const addons = new Set(lb.addons || []);
+      const isActive = (checkPlan, checkKey) => {
+        if (checkPlan === 'essentials') return true;
+        if (checkPlan === 'enterprise') return plan === 'enterprise';
+        if (checkPlan === 'addon') return plan === 'enterprise' || addons.has(checkKey);
+        return false;
+      };
+      const activeDiffs = lb.diffs.filter((d) => isActive(d.plan || 'essentials', d.key));
+      const activeInspections = (lb.inspections || []).filter((i) => isActive(i.plan || 'essentials', i.key));
+      const activePassed = (lb.passed || []).filter((p) => isActive(p.plan || 'essentials', p.key));
       const skipCount = lb.skipped?.length || 0;
-      const passCount = lb.passed?.length || 0;
-      const failCount = lb.diffs.length;
+      const passCount = activePassed.length;
+      const recommendedCount = activeDiffs.filter((d) => d.required === false).length;
+      const requiredFailCount = activeDiffs.filter((d) => d.required !== false).length +
+        activeInspections.filter((i) => !i.pass).length;
       const summary = document.createElement('summary');
       const parts = [];
       if (passCount) parts.push(`${passCount} passed`);
-      if (failCount) parts.push(`${failCount} failed`);
+      if (requiredFailCount) parts.push(`${requiredFailCount} failed`);
+      if (recommendedCount) parts.push(`${recommendedCount} recommended`);
       if (skipCount) parts.push(`${skipCount} skipped`);
       summary.textContent = `${lb.pass ? '✓' : '✗'} ${lb.name} (${parts.join(', ')})`;
       lbEl.appendChild(summary);
 
-      const list = document.createElement('ul');
-      list.className = 'diff-list';
-      for (const d of lb.diffs) {
-        const li = document.createElement('li');
-        li.className = 'diff-item diff-fail';
-        let text = d.path;
-        if (d.type === 'MISSING') {
-          text += ' — missing';
-        } else {
-          text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
+      if (lb.categorized?.length) {
+        for (const cat of lb.categorized) {
+          const catSection = document.createElement('div');
+          catSection.className = 'popup-category';
+
+          const catHeader = document.createElement('div');
+          catHeader.className = 'popup-category-header';
+          catHeader.textContent = cat.label;
+          catSection.appendChild(catHeader);
+
+          const list = document.createElement('ul');
+          list.className = 'diff-list';
+
+          for (const d of cat.failed) {
+            const check = cat.checks?.find((c) => d.path.split('.')[1] === c.key);
+            const displayName = check?.label || d.path;
+            const isOptional = d.required === false;
+            const active = isActive(d.plan || check?.plan || 'essentials', check?.key);
+            const li = document.createElement('li');
+            if (!active) {
+              const tag = (d.plan || check?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+              li.className = 'diff-item diff-unavailable';
+              if (check?.description) li.dataset.tooltip = check.description;
+              li.textContent = `${displayName} — ${tag}`;
+            } else {
+              li.className = `diff-item ${isOptional ? 'diff-recommended' : 'diff-fail'}`;
+              if (check?.description) li.dataset.tooltip = check.description;
+              let text = isOptional ? `${displayName} — recommended` : displayName;
+              if (d.type === 'MISSING') {
+                text += isOptional ? '' : ' — missing';
+              } else {
+                text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
+              }
+              li.textContent = text;
+              if (d.explanation) {
+                const reason = document.createElement('div');
+                reason.className = 'diff-reason';
+                reason.textContent = d.explanation.reason;
+                li.appendChild(reason);
+              }
+            }
+            list.appendChild(li);
+          }
+
+          for (const insp of cat.inspections || []) {
+            const inspCheck = cat.checks?.find((c) => c.inspector === insp.inspector);
+            const inspLabel = inspCheck?.label || insp.refName;
+            const active = isActive(insp.plan || inspCheck?.plan || 'essentials', inspCheck?.key);
+            if (!active) {
+              const tag = (insp.plan || inspCheck?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+              const li = document.createElement('li');
+              li.className = 'diff-item diff-unavailable';
+              if (inspCheck?.description) li.dataset.tooltip = inspCheck.description;
+              li.textContent = `${inspLabel} — ${tag}`;
+              list.appendChild(li);
+            } else if (insp.pass) {
+              const li = document.createElement('li');
+              li.className = 'diff-item diff-pass';
+              if (inspCheck?.description) li.dataset.tooltip = inspCheck.description;
+              li.textContent = inspLabel;
+              list.appendChild(li);
+            } else {
+              for (const d of insp.diffs) {
+                const li = document.createElement('li');
+                li.className = 'diff-item diff-fail';
+                if (inspCheck?.description) li.dataset.tooltip = inspCheck.description;
+                li.textContent = inspLabel;
+                if (d.type !== 'MISSING') {
+                  li.textContent += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
+                } else {
+                  li.textContent += ' — missing';
+                }
+                if (d.explanation) {
+                  const reason = document.createElement('div');
+                  reason.className = 'diff-reason';
+                  reason.textContent = d.explanation.reason;
+                  li.appendChild(reason);
+                }
+                list.appendChild(li);
+              }
+            }
+          }
+
+          if (cat.skipped.length) {
+            for (const s of cat.skipped) {
+              const check = cat.checks?.find((c) => c.key === s.key);
+              const label = check?.label || s.label;
+              const li = document.createElement('li');
+              li.className = 'diff-item diff-skip';
+              if (check?.description) li.dataset.tooltip = check.description;
+              li.textContent = `${label} — Ignored by Label`;
+              list.appendChild(li);
+            }
+          }
+
+          if (cat.passed.length) {
+            for (const p of cat.passed) {
+              const check = cat.checks?.find((c) => c.key === p.key);
+              const active = isActive(p.plan || check?.plan || 'essentials', check?.key);
+              const li = document.createElement('li');
+              if (!active) {
+                const tag = (p.plan || check?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+                li.className = 'diff-item diff-unavailable';
+                if (check?.description) li.dataset.tooltip = check.description;
+                li.textContent = `${check?.label || p.key} — ${tag}`;
+              } else {
+                li.className = 'diff-item diff-pass';
+                if (check?.description) li.dataset.tooltip = check.description;
+                li.textContent = check?.label || p.key;
+              }
+              list.appendChild(li);
+            }
+          }
+
+          catSection.appendChild(list);
+          lbEl.appendChild(catSection);
         }
-        li.textContent = text;
-        if (d.explanation) {
-          const reason = document.createElement('div');
-          reason.className = 'diff-reason';
-          reason.textContent = d.explanation.reason;
-          li.appendChild(reason);
+      } else {
+        const list = document.createElement('ul');
+        list.className = 'diff-list';
+        for (const d of lb.diffs) {
+          const li = document.createElement('li');
+          li.className = 'diff-item diff-fail';
+          let text = d.path;
+          if (d.type === 'MISSING') {
+            text += ' — missing';
+          } else {
+            text += ` — expected: ${fmt(d.expected)}, found: ${fmt(d.found)}`;
+          }
+          li.textContent = text;
+          if (d.explanation) {
+            const reason = document.createElement('div');
+            reason.className = 'diff-reason';
+            reason.textContent = d.explanation.reason;
+            li.appendChild(reason);
+          }
+          list.appendChild(li);
         }
-        list.appendChild(li);
+        if (skipCount) {
+          const skipLi = document.createElement('li');
+          skipLi.className = 'diff-item diff-skip';
+          skipLi.textContent = `${lb.skipped.map((s) => s.label).join(', ')} — Ignored by Label`;
+          list.appendChild(skipLi);
+        }
+        if (passCount) {
+          const passLi = document.createElement('li');
+          passLi.className = 'diff-item diff-pass';
+          passLi.textContent = `Passed: ${lb.passed.map((p) => p.key).join(', ')}`;
+          list.appendChild(passLi);
+        }
+        lbEl.appendChild(list);
       }
-      if (skipCount) {
-        const skipLi = document.createElement('li');
-        skipLi.className = 'diff-item diff-skip';
-        skipLi.textContent = `Skipped: ${lb.skipped.map((s) => `${s.label} (${s.labelKey}=true)`).join(', ')}`;
-        list.appendChild(skipLi);
-      }
-      if (passCount) {
-        const passLi = document.createElement('li');
-        passLi.className = 'diff-item diff-pass';
-        passLi.textContent = `Passed: ${lb.passed.map((p) => p.key).join(', ')}`;
-        list.appendChild(passLi);
-      }
-      lbEl.appendChild(list);
 
       detailsEl.appendChild(lbEl);
     }

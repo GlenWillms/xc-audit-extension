@@ -15,11 +15,21 @@
         chrome.runtime.sendMessage({ type: 'CLEAR_CACHE' }, () => checkPage(true));
       }
       if (message.type === 'REGISTER_LABELS') {
-        registerLabels(message.labels).then(sendResponse);
+        registerLabels(message.labels)
+          .then(sendResponse)
+          .catch((err) => sendResponse({ error: err.message }));
+        return true;
+      }
+      if (message.type === 'DELETE_LABELS') {
+        deleteLabels(message.labels)
+          .then(sendResponse)
+          .catch((err) => sendResponse({ error: err.message }));
         return true;
       }
       if (message.type === 'GET_POLICIES') {
-        fetchPolicies(message.namespace).then(sendResponse);
+        fetchPolicies(message.namespace)
+          .then(sendResponse)
+          .catch((err) => sendResponse({ error: err.message }));
         return true;
       }
     });
@@ -118,10 +128,12 @@
         )
       ).filter(Boolean);
 
+      const referencedObjects = await fetchReferencedObjects(lbConfigs, namespace, apiUrl, policies, defaultPolicies);
+
       chrome.runtime.sendMessage(
         {
           type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT',
-          tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions,
+          tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects,
         },
         (response) => {
           if (chrome.runtime.lastError) return;
@@ -142,6 +154,70 @@
         showSessionBanner();
       }
     }
+  }
+
+  async function fetchReferencedObjects(lbConfigs, namespace, apiUrl, policies, defaultPolicies) {
+    const refs = { appFirewall: {}, servicePolicy: {} };
+    const fwSeen = new Map();
+    const spSeen = new Map();
+
+    for (const lb of lbConfigs) {
+      const fw = lb.spec?.app_firewall;
+      if (fw?.name) {
+        const ns = fw.namespace || namespace;
+        const key = `${ns}/${fw.name}`;
+        if (!fwSeen.has(key)) fwSeen.set(key, { name: fw.name, namespace: ns });
+      }
+    }
+
+    const nsPolicies = policies?.service_policies || defaultPolicies?.service_policies || [];
+    for (const sp of nsPolicies) {
+      if (sp?.name) {
+        const ns = sp.namespace || namespace;
+        const key = `${ns}/${sp.name}`;
+        if (!spSeen.has(key)) spSeen.set(key, { name: sp.name, namespace: ns });
+      }
+    }
+
+    for (const lb of lbConfigs) {
+      const lbPolicies = lb.spec?.active_service_policies?.policies || [];
+      for (const sp of lbPolicies) {
+        if (sp?.name) {
+          const ns = sp.namespace || namespace;
+          const key = `${ns}/${sp.name}`;
+          if (!spSeen.has(key)) spSeen.set(key, { name: sp.name, namespace: ns });
+        }
+      }
+    }
+
+    const fetches = [];
+
+    for (const [key, ref] of fwSeen) {
+      fetches.push((async () => {
+        try {
+          const resp = await fetch(apiUrl(`/api/config/namespaces/${ref.namespace}/app_firewalls/${ref.name}`));
+          if (resp.ok) {
+            refs.appFirewall[key] = await resp.json();
+            console.log('[XC Audit] Fetched app firewall policy:', key, refs.appFirewall[key]);
+          }
+        } catch {}
+      })());
+    }
+
+    for (const [key, ref] of spSeen) {
+      fetches.push((async () => {
+        try {
+          const resp = await fetch(apiUrl(`/api/config/namespaces/${ref.namespace}/service_policys/${ref.name}`));
+          if (resp.ok) {
+            refs.servicePolicy[key] = await resp.json();
+            console.log('[XC Audit] Fetched service policy:', key, refs.servicePolicy[key]);
+          }
+        } catch {}
+      })());
+    }
+
+    await Promise.all(fetches);
+    return refs;
   }
 
   function observeAndInject() {
@@ -174,50 +250,144 @@
     return String(val);
   }
 
+  function resolveCheck(checks, path) {
+    const topKey = path.split('.')[1];
+    return checks?.find((c) => c.key === topKey) || null;
+  }
+
+  function isActiveForPlan(checkPlan, currentPlan, addons, checkKey) {
+    if (checkPlan === 'essentials') return true;
+    if (checkPlan === 'enterprise') return currentPlan === 'enterprise';
+    if (checkPlan === 'addon') return currentPlan === 'enterprise' || addons?.includes(checkKey);
+    return false;
+  }
+
+  function planTagLabel(checkPlan) {
+    if (checkPlan === 'enterprise') return 'Enterprise';
+    if (checkPlan === 'addon') return 'Add-on';
+    return null;
+  }
+
+  function buildDiffHtml(d, checks, planCtx) {
+    const check = resolveCheck(checks, d.path);
+    const displayName = check?.label || d.path;
+    const tooltip = check?.description || '';
+    const isOptional = d.required === false;
+    const active = isActiveForPlan(d.plan || check?.plan || 'essentials', planCtx?.plan, planCtx?.addons, check?.key);
+    if (!active) {
+      const tag = planTagLabel(d.plan || check?.plan);
+      return `<div class="xc-audit-issue xc-audit-unavailable"><span class="xc-audit-plan-tag">${tag}</span><div class="xc-audit-issue-path"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(displayName)}</div></div>`;
+    }
+    let html = `<div class="xc-audit-issue${isOptional ? ' xc-audit-issue-optional' : ''}">`;
+    if (isOptional) {
+      html += `<span class="xc-audit-recommended-tag">Recommended</span>`;
+    }
+    html += `<div class="xc-audit-issue-path"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(displayName)}</div>`;
+    if (d.type === 'MISSING') {
+      html += `<div class="xc-audit-issue-detail">Configuration is <strong>missing</strong></div>`;
+    } else {
+      html += `<div class="xc-audit-issue-detail">Expected: <code>${escapeHtml(fmt(d.expected))}</code></div>`;
+      html += `<div class="xc-audit-issue-detail">Found: <code>${escapeHtml(fmt(d.found))}</code></div>`;
+    }
+    if (d.explanation) {
+      html += `<div class="xc-audit-reason">${escapeHtml(d.explanation.reason)}</div>`;
+      if (d.explanation.next_step) {
+        html += `<div class="xc-audit-fix">${escapeHtml(d.explanation.next_step)}</div>`;
+      }
+    }
+    html += `</div>`;
+    return html;
+  }
+
   function buildDetailRow(result) {
     const row = document.createElement('div');
     row.className = 'xc-audit-detail-row';
     let html = '';
 
-    if (result.diffs.length) {
-      html += `<div class="xc-audit-section xc-audit-section-fail">`;
-      html += `<div class="xc-audit-section-header">Failed (${result.diffs.length})</div>`;
-      for (const d of result.diffs) {
-        html += `<div class="xc-audit-issue">`;
-        html += `<div class="xc-audit-issue-path">${escapeHtml(d.path)}</div>`;
-        if (d.type === 'MISSING') {
-          html += `<div class="xc-audit-issue-detail">Configuration is <strong>missing</strong></div>`;
-        } else {
-          html += `<div class="xc-audit-issue-detail">Expected: <code>${escapeHtml(fmt(d.expected))}</code></div>`;
-          html += `<div class="xc-audit-issue-detail">Found: <code>${escapeHtml(fmt(d.found))}</code></div>`;
-        }
-        if (d.explanation) {
-          html += `<div class="xc-audit-reason">${escapeHtml(d.explanation.reason)}</div>`;
-          if (d.explanation.next_step) {
-            html += `<div class="xc-audit-fix">${escapeHtml(d.explanation.next_step)}</div>`;
+    const currentPlan = result.plan || 'essentials';
+    const planCtx = { plan: currentPlan, addons: result.addons || [] };
+    if (result.categorized?.length) {
+      for (const cat of result.categorized) {
+        html += `<div class="xc-audit-category">`;
+        html += `<div class="xc-audit-category-header">${escapeHtml(cat.label)}</div>`;
+
+        if (cat.failed.length) {
+          for (const d of cat.failed) {
+            html += buildDiffHtml(d, cat.checks, planCtx);
           }
+        }
+
+        if (cat.inspections?.length) {
+          for (const insp of cat.inspections) {
+            const inspCheck = cat.checks?.find((c) => c.inspector === insp.inspector);
+            const inspLabel = inspCheck?.label || insp.refName;
+            const inspTooltip = inspCheck?.description || '';
+            const active = isActiveForPlan(insp.plan || inspCheck?.plan || 'essentials', currentPlan, planCtx.addons, inspCheck?.key);
+            if (!active) {
+              const tag = planTagLabel(insp.plan || inspCheck?.plan);
+              html += `<span class="xc-audit-unavailable-tag" data-tooltip="${escapeHtml(inspTooltip)}">${escapeHtml(inspLabel)} — ${tag}</span>`;
+            } else if (insp.pass) {
+              html += `<span class="xc-audit-passed-tag"${inspTooltip ? ` data-tooltip="${escapeHtml(inspTooltip)}"` : ''}>${escapeHtml(inspLabel)}</span>`;
+            } else {
+              html += `<div class="xc-audit-inspection">`;
+              html += `<div class="xc-audit-inspection-header"${inspTooltip ? ` data-tooltip="${escapeHtml(inspTooltip)}"` : ''}>${escapeHtml(inspLabel)} (${insp.diffs.length} issue${insp.diffs.length === 1 ? '' : 's'})</div>`;
+              for (const d of insp.diffs) {
+                html += buildDiffHtml(d, null, planCtx);
+              }
+              html += `</div>`;
+            }
+          }
+        }
+
+        if (cat.skipped.length) {
+          for (const s of cat.skipped) {
+            const check = cat.checks?.find((c) => c.key === s.key);
+            const label = check?.label || s.label;
+            const tooltip = check?.description || '';
+            html += `<span class="xc-audit-skipped-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — Ignored by Label</span>`;
+          }
+        }
+
+        if (cat.passed.length) {
+          for (const p of cat.passed) {
+            const check = cat.checks?.find((c) => c.key === p.key);
+            const label = check?.label || p.key;
+            const tooltip = check?.description || '';
+            const active = isActiveForPlan(p.plan || check?.plan || 'essentials', currentPlan, planCtx.addons, check?.key);
+            if (!active) {
+              const tag = planTagLabel(p.plan || check?.plan);
+              html += `<span class="xc-audit-unavailable-tag" data-tooltip="${escapeHtml(tooltip)}">${escapeHtml(label)} — ${tag}</span>`;
+            } else {
+              html += `<span class="xc-audit-passed-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)}</span>`;
+            }
+          }
+        }
+
+        html += `</div>`;
+      }
+    } else {
+      if (result.diffs.length) {
+        html += `<div class="xc-audit-section xc-audit-section-fail">`;
+        html += `<div class="xc-audit-section-header">Failed (${result.diffs.length})</div>`;
+        for (const d of result.diffs) { html += buildDiffHtml(d); }
+        html += `</div>`;
+      }
+      if (result.skipped?.length) {
+        html += `<div class="xc-audit-section xc-audit-section-skip">`;
+        html += `<div class="xc-audit-section-header">Skipped (${result.skipped.length})</div>`;
+        for (const s of result.skipped) {
+          html += `<span class="xc-audit-skipped-tag">${escapeHtml(s.label)} — Ignored by Label</span>`;
         }
         html += `</div>`;
       }
-      html += `</div>`;
-    }
-
-    if (result.skipped?.length) {
-      html += `<div class="xc-audit-section xc-audit-section-skip">`;
-      html += `<div class="xc-audit-section-header">Skipped (${result.skipped.length})</div>`;
-      for (const s of result.skipped) {
-        html += `<span class="xc-audit-skipped-tag">${escapeHtml(s.label)} <code>${escapeHtml(s.labelKey)}=true</code></span>`;
+      if (result.passed?.length) {
+        html += `<div class="xc-audit-section xc-audit-section-pass">`;
+        html += `<div class="xc-audit-section-header">Passed (${result.passed.length})</div>`;
+        for (const p of result.passed) {
+          html += `<span class="xc-audit-passed-tag">${escapeHtml(p.key)}</span>`;
+        }
+        html += `</div>`;
       }
-      html += `</div>`;
-    }
-
-    if (result.passed?.length) {
-      html += `<div class="xc-audit-section xc-audit-section-pass">`;
-      html += `<div class="xc-audit-section-header">Passed (${result.passed.length})</div>`;
-      for (const p of result.passed) {
-        html += `<span class="xc-audit-passed-tag">${escapeHtml(p.key)}</span>`;
-      }
-      html += `</div>`;
     }
 
     row.innerHTML = html;
@@ -237,15 +407,23 @@
       const result = auditResults.loadBalancers.find((lb) => lb.name === lbName);
       if (!result) continue;
 
+      const plan = result.plan || 'essentials';
+      const addons = result.addons || [];
+      const activeDiffs = result.diffs.filter((d) => isActiveForPlan(d.plan || 'essentials', plan, addons, d.key));
+      const activeInspections = (result.inspections || []).filter((i) => isActiveForPlan(i.plan || 'essentials', plan, addons, i.key));
+      const activePassed = (result.passed || []).filter((p) => isActiveForPlan(p.plan || 'essentials', plan, addons, p.key));
       const skipCount = result.skipped?.length || 0;
-      const passCount = result.passed?.length || 0;
-      const failCount = result.diffs.length;
+      const passCount = activePassed.length;
+      const recommendedCount = activeDiffs.filter((d) => d.required === false).length;
+      const requiredFailCount = activeDiffs.filter((d) => d.required !== false).length +
+        activeInspections.filter((i) => !i.pass).length;
       const badge = document.createElement('span');
       badge.className = `xc-audit-badge ${result.pass ? 'xc-audit-pass' : 'xc-audit-fail'}`;
 
       const parts = [];
       if (passCount) parts.push(`${passCount} passed`);
-      if (failCount) parts.push(`${failCount} failed`);
+      if (requiredFailCount) parts.push(`${requiredFailCount} failed`);
+      if (recommendedCount) parts.push(`${recommendedCount} recommended`);
       if (skipCount) parts.push(`${skipCount} skipped`);
       badge.textContent = (result.pass ? 'PASS' : 'FAIL') + (parts.length ? ` (${parts.join(', ')})` : '');
       badge.title = 'Click to toggle details';
@@ -292,6 +470,76 @@
     if (!csrf) return { error: 'No CSRF token available. Navigate to the XC console first.' };
 
     const apiPrefix = currentManagedTenant ? `/managed_tenant/${currentManagedTenant}` : '';
+    const api = async (method, path, body) => {
+      const opts = { method, headers: { 'Content-Type': 'application/json' } };
+      if (body) opts.body = JSON.stringify(body);
+      const resp = await fetch(`${apiPrefix}${path}?csrf=${csrf}`, opts);
+      const text = await resp.text();
+      return { ok: resp.ok, status: resp.status, body: text };
+    };
+
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    const results = [];
+
+    for (const { key, value, description } of labels) {
+      try {
+        const keyResp = await api('POST',
+          '/api/config/namespaces/shared/known_label_key/create',
+          { namespace: 'shared', key, description }
+        );
+        const keyExists = keyResp.body.includes('already exists') || keyResp.status === 409;
+        const keyOk = keyResp.ok || keyExists;
+        if (!keyOk) {
+          results.push({ key, value, status: 'error', detail: `key: ${keyResp.status}: ${keyResp.body.slice(0, 200)}` });
+          await delay(1500);
+          continue;
+        }
+
+        if (keyExists && description) {
+          await delay(1500);
+          const getResp = await api('GET', `/api/config/namespaces/shared/known_label_key/${key}`);
+          if (getResp.ok) {
+            try {
+              const existing = JSON.parse(getResp.body);
+              if (!existing.description && !existing.spec?.description) {
+                await delay(1500);
+                await api('PUT', `/api/config/namespaces/shared/known_label_key/${key}`,
+                  { namespace: 'shared', key, description }
+                );
+              }
+            } catch {}
+          }
+        }
+
+        await delay(1500);
+
+        const valResp = await api('POST',
+          '/api/config/namespaces/shared/known_label/create',
+          { namespace: 'shared', key, value, description }
+        );
+        if (valResp.ok) {
+          results.push({ key, value, status: 'created' });
+        } else {
+          const exists = valResp.body.includes('already exists') || valResp.status === 409;
+          results.push({
+            key, value,
+            status: exists ? 'exists' : 'error',
+            detail: exists ? undefined : `val: ${valResp.status}: ${valResp.body.slice(0, 200)}`,
+          });
+        }
+      } catch (err) {
+        results.push({ key, value, status: 'error', detail: err.message });
+      }
+      await delay(1500);
+    }
+    return { results };
+  }
+
+  async function deleteLabels(labels) {
+    const csrf = await getCsrf();
+    if (!csrf) return { error: 'No CSRF token available. Navigate to the XC console first.' };
+
+    const apiPrefix = currentManagedTenant ? `/managed_tenant/${currentManagedTenant}` : '';
     const post = async (path, body) => {
       const resp = await fetch(`${apiPrefix}${path}?csrf=${csrf}`, {
         method: 'POST',
@@ -307,31 +555,26 @@
 
     for (const { key, value } of labels) {
       try {
-        const keyResp = await post(
-          '/api/config/namespaces/shared/known_label_key/create',
-          { namespace: 'shared', key }
-        );
-        const keyOk = keyResp.ok || keyResp.body.includes('already exists') || keyResp.status === 409;
-        if (!keyOk) {
-          results.push({ key, value, status: 'error', detail: `key: ${keyResp.status}: ${keyResp.body.slice(0, 200)}` });
-          await delay(1500);
-          continue;
-        }
-
-        await delay(1500);
-
         const valResp = await post(
-          '/api/config/namespaces/shared/known_label/create',
+          '/api/config/namespaces/shared/known_label/delete',
           { namespace: 'shared', key, value }
         );
-        if (valResp.ok) {
-          results.push({ key, value, status: 'created' });
+        await delay(1500);
+
+        const keyResp = await post(
+          '/api/config/namespaces/shared/known_label_key/delete',
+          { namespace: 'shared', key }
+        );
+
+        if (valResp.ok || keyResp.ok) {
+          results.push({ key, value, status: 'deleted' });
         } else {
-          const exists = valResp.body.includes('already exists') || valResp.status === 409;
+          const notFound = (valResp.status === 404 || valResp.body.includes('not found')) &&
+            (keyResp.status === 404 || keyResp.body.includes('not found'));
           results.push({
             key, value,
-            status: exists ? 'exists' : 'error',
-            detail: exists ? undefined : `val: ${valResp.status}: ${valResp.body.slice(0, 200)}`,
+            status: notFound ? 'not_found' : 'error',
+            detail: notFound ? undefined : `${keyResp.status}: ${keyResp.body.slice(0, 200)}`,
           });
         }
       } catch (err) {

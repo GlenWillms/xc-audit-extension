@@ -3,17 +3,33 @@
         "reason": "The active service policies do not match the corporate baseline.",
         "next_step": "Ensure the 'Corporate Block List' and 'Geo Fencing' policies are applied in the correct order."
     },
-    "spec.app_firewall.name": {
-        "reason": "The application firewall policy does not match the corporate baseline.",
-        "next_step": "Apply the 'Shared/AppFW-Blocking' policy as per corporate baseline."
-    },
     "spec.app_firewall": {
         "reason": "Application firewall is not configured.",
-        "next_step": "Apply the 'Shared/AppFW-Blocking' policy as per corporate baseline."
+        "next_step": "Assign a Web Application Firewall policy to this load balancer."
     },
-    "spec.__ONE_OF__tls_hsts": {
-        "reason": "TLS configuration is invalid.",
-        "next_step": "Enable 'HTTPS Auto-Cert' or configure manual 'HTTPS' ports. HSTS must be enabled."
+    "appfw.spec.blocking": {
+        "reason": "WAF is not in blocking mode.",
+        "next_step": "Enable blocking mode on the app firewall policy to actively block malicious requests."
+    },
+    "appfw.spec.detection_settings": {
+        "reason": "Threat campaign detection is not enabled.",
+        "next_step": "Enable threat campaigns in the app firewall detection settings."
+    },
+    "appfw.spec.__ONE_OF__bot_protection": {
+        "reason": "Malicious bot blocking is not configured.",
+        "next_step": "Enable bot protection with malicious bot action set to Block, or use default bot protection settings."
+    },
+    "appfw.spec.enable_ai_enhancements": {
+        "reason": "AI risk mitigation is not enabled.",
+        "next_step": "Enable AI-powered risk mitigation for enhanced threat detection (enterprise feature)."
+    },
+    "spec.__ONE_OF__tls": {
+        "reason": "TLS is not configured.",
+        "next_step": "Enable 'HTTPS Auto-Cert' or configure manual 'HTTPS' with a certificate."
+    },
+    "spec.__ONE_OF__hsts": {
+        "reason": "HSTS is not enabled.",
+        "next_step": "Enable 'Add HSTS Header' in the TLS configuration."
     },
     "spec.enable_api_discovery": {
         "reason": "API Discovery is not enabled.",
@@ -22,5 +38,17 @@
     "spec.advertise_on_public_default_vip": {
         "reason": "The load balancer is not advertising on the public default VIP as per baseline.",
         "next_step": "Enable 'Advertise on Public Default VIP' to comply with baseline."
+    },
+    "iprep.categories": {
+        "reason": "IP threat intelligence coverage is insufficient in the applied service policies.",
+        "next_step": "Ensure a service policy with at least 10 IP threat categories is applied."
+    },
+    "geo.blocked_countries": {
+        "reason": "Required geo-blocking countries are not all present in the applied service policies.",
+        "next_step": "Ensure a service policy with a deny list blocks Russia (COUNTRY_RU), Iran (COUNTRY_IR), and North Korea (COUNTRY_KP)."
+    },
+    "appfw.spec": {
+        "reason": "The app firewall policy configuration does not match the baseline.",
+        "next_step": "Review the app firewall policy settings and align with the corporate baseline."
     }
 }

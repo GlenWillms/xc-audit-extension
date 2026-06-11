@@ -1,36 +1,159 @@
 const $ = (id) => document.getElementById(id);
 
-const CHECK_REGISTRY = [
-  { category: 'TLS & Encryption', key: '__ONE_OF__tls_hsts', label: 'TLS / HSTS', code: 'ignore-tls' },
-  { category: 'Web Application Firewall', key: 'app_firewall', label: 'App Firewall', code: 'ignore-waf' },
-  { category: 'DDoS Protection', key: 'ddos_mitigation_rules', label: 'DDoS Mitigation Rules', code: 'ignore-ddos' },
-  { category: 'DDoS Protection', key: 'l7_ddos_protection', label: 'L7 DDoS Protection', code: 'ignore-ddos' },
-  { category: 'API Security', key: 'enable_api_discovery', label: 'API Discovery', code: 'ignore-apid' },
-  { category: 'API Security', key: 'disable_api_definition', label: 'API Definition', code: 'ignore-apip' },
-  { category: 'API Security', key: 'disable_api_testing', label: 'API Testing', code: 'ignore-apip' },
-  { category: 'Bot & Client Protection', key: 'disable_bot_defense', label: 'Bot Defense', code: 'ignore-bot' },
-  { category: 'Bot & Client Protection', key: 'disable_client_side_defense', label: 'Client-Side Defense', code: 'ignore-csd' },
-  { category: 'Bot & Client Protection', key: 'disable_ip_reputation', label: 'IP Reputation', code: 'ignore-iprep' },
-  { category: 'Policy & Data', key: 'service_policies_from_namespace', label: 'Service Policies (from namespace)', code: 'ignore-sp' },
-  { category: 'Policy & Data', key: 'default_sensitive_data_policy', label: 'Sensitive Data Policy', code: 'ignore-sdp' },
-  { category: 'Policy & Data', key: 'disable_trust_client_ip_headers', label: 'Trust Client IP Headers', code: 'ignore-trustip' },
-];
+const XC_TAB_PATTERN = 'https://*.console.ves.volterra.io/*';
 
-document.addEventListener('DOMContentLoaded', loadAll);
+let selectedTenant = null;
 
-async function loadAll() {
-  const { baseline, explanations, exemptionMap, settings } =
-    await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'settings']);
+function shortTenantName(tenant) {
+  if (!tenant) return '';
+  const parts = tenant.split('-');
+  return parts.length > 1 ? parts.slice(0, -1).join('-') : tenant;
+}
 
-  renderChecks(baseline);
-  renderPolicies();
-  renderExemptionMap(exemptionMap || {});
-  renderRawJson(baseline, explanations);
+function tenantKey(tenant, key) {
+  return `tenant:${tenant}:${key}`;
+}
 
-  const s = settings || {};
-  $('autoAudit').checked = s.autoAudit !== false;
+async function getTenantConfig(tenant) {
+  const keys = ['baseline', 'explanations', 'exemptionMap', 'settings', 'policyOverrides'];
+  if (!tenant) {
+    const data = await chrome.storage.local.get(keys);
+    return Object.fromEntries(keys.map((k) => [k, data[k]]));
+  }
+  const allKeys = [...keys.map((k) => tenantKey(tenant, k)), ...keys];
+  const data = await chrome.storage.local.get(allKeys);
+  const result = {};
+  for (const k of keys) {
+    result[k] = data[tenantKey(tenant, k)] ?? data[k];
+  }
+  return result;
+}
 
+async function setTenantData(key, value) {
+  const storageKey = selectedTenant ? tenantKey(selectedTenant, key) : key;
+  await chrome.storage.local.set({ [storageKey]: value });
+}
+
+async function removeTenantData(key) {
+  const storageKey = selectedTenant ? tenantKey(selectedTenant, key) : key;
+  await chrome.storage.local.remove(storageKey);
+}
+
+async function sendToXcTab(message) {
+  const tabs = await chrome.tabs.query({ url: XC_TAB_PATTERN });
+  if (!tabs.length) return { error: 'No XC console tab open. Open the XC console first.' };
+  const tabId = tabs[0].id;
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['src/lib/url-parser.js', 'src/content/content-script.js'],
+    });
+    await chrome.scripting.insertCSS({
+      target: { tabId },
+      files: ['src/content/content-style.css'],
+    });
+    return await chrome.tabs.sendMessage(tabId, message);
+  }
+}
+
+let CHECK_CATEGORIES = [];
+let CHECK_REGISTRY = [];
+
+async function loadCategories() {
+  const resp = await fetch(chrome.runtime.getURL('assets/check-categories.json'));
+  CHECK_CATEGORIES = await resp.json();
+  CHECK_REGISTRY = CHECK_CATEGORIES.flatMap((cat) =>
+    cat.checks.map((check) => ({ ...check, category: cat.label, categoryId: cat.id }))
+  );
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadCategories();
+  await initTenantSelector();
+  await loadTenantConfig();
   bindEvents();
+});
+
+async function initTenantSelector() {
+  const { knownTenants = [], lastSelectedTenant } = await chrome.storage.local.get(['knownTenants', 'lastSelectedTenant']);
+  const select = $('tenantSelect');
+  select.innerHTML = '';
+
+  if (!knownTenants.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No tenants found — navigate to XC console';
+    select.appendChild(opt);
+    selectedTenant = null;
+    return;
+  }
+
+  for (const t of knownTenants) {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    select.appendChild(opt);
+  }
+
+  if (lastSelectedTenant && knownTenants.includes(lastSelectedTenant)) {
+    select.value = lastSelectedTenant;
+    selectedTenant = lastSelectedTenant;
+  } else {
+    select.value = knownTenants[0];
+    selectedTenant = knownTenants[0];
+  }
+}
+
+async function loadTenantConfig() {
+  const config = await getTenantConfig(selectedTenant);
+  const { settings: globalSettings } = await chrome.storage.local.get('settings');
+
+  renderChecks(config.baseline);
+  renderPolicies();
+  renderExemptionMap(config.exemptionMap || {});
+  renderRawJson(config.baseline, config.explanations);
+  const tenantLabel = selectedTenant ? shortTenantName(selectedTenant) : 'XC';
+  $('registerLabels').textContent = `Register Labels in ${tenantLabel}`;
+  $('deleteLabels').textContent = `Delete Labels from ${tenantLabel}`;
+
+  const s = config.settings || {};
+  $('autoAudit').checked = (globalSettings || {}).autoAudit !== false;
+  $('planSelect').value = s.plan || 'essentials';
+  renderAddons(s);
+}
+
+function renderAddons(settings) {
+  const container = $('addonsContainer');
+  container.innerHTML = '';
+  const plan = settings.plan || 'essentials';
+
+  if (plan === 'enterprise') {
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'All add-ons are included with the Enterprise plan.';
+    container.appendChild(hint);
+    return;
+  }
+
+  const addons = CHECK_CATEGORIES.flatMap((cat) =>
+    cat.checks.filter((c) => c.plan === 'addon').map((c) => ({ ...c, category: cat.label }))
+  );
+  const enabledAddons = settings.addons || [];
+  for (const addon of addons) {
+    const row = document.createElement('label');
+    row.className = 'toggle-row';
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.checked = enabledAddons.includes(addon.key);
+    toggle.dataset.addonKey = addon.key;
+    const span = document.createElement('span');
+    span.textContent = addon.label;
+    row.appendChild(toggle);
+    row.appendChild(span);
+    container.appendChild(row);
+  }
 }
 
 function renderChecks(baseline) {
@@ -39,22 +162,16 @@ function renderChecks(baseline) {
   const container = $('checksContainer');
   container.innerHTML = '';
 
-  const categories = {};
-  for (const check of CHECK_REGISTRY) {
-    if (!categories[check.category]) categories[check.category] = [];
-    categories[check.category].push(check);
-  }
-
-  for (const [cat, checks] of Object.entries(categories)) {
+  for (const cat of CHECK_CATEGORIES) {
     const group = document.createElement('div');
     group.className = 'check-group';
 
     const header = document.createElement('div');
     header.className = 'check-group-header';
-    header.textContent = cat;
+    header.textContent = cat.label;
     group.appendChild(header);
 
-    for (const check of checks) {
+    for (const check of cat.checks) {
       const row = document.createElement('label');
       row.className = 'check-row';
 
@@ -79,8 +196,8 @@ function renderChecks(baseline) {
 
 async function renderPolicies() {
   const container = $('currentPolicies');
-  const { baseline, policyOverrides } = await chrome.storage.local.get(['baseline', 'policyOverrides']);
-  const staticPolicies = baseline?.namespace_baseline?.service_policies;
+  const config = await getTenantConfig(selectedTenant);
+  const staticPolicies = config.baseline?.namespace_baseline?.service_policies;
 
   if (staticPolicies && Array.isArray(staticPolicies) && staticPolicies.length) {
     container.innerHTML = `<div class="policy-source">Static fallback baseline:</div>` +
@@ -91,7 +208,7 @@ async function renderPolicies() {
     container.innerHTML = `<div class="policy-source">Policy baseline is fetched dynamically from the <code>default</code> namespace at audit time.</div>`;
   }
 
-  const overrides = policyOverrides || {};
+  const overrides = config.policyOverrides || {};
   const overridesList = $('overridesList');
   overridesList.innerHTML = '';
   const nsNames = Object.keys(overrides);
@@ -106,7 +223,7 @@ async function renderPolicies() {
         ` <button class="btn-danger btn-sm override-remove" data-ns="${ns}">Remove</button>`;
       row.querySelector('.override-remove').addEventListener('click', async () => {
         delete overrides[ns];
-        await chrome.storage.local.set({ policyOverrides: overrides });
+        await setTenantData('policyOverrides', overrides);
         renderPolicies();
         showStatus('policiesStatus', `Override for ${ns} removed`, 'success');
       });
@@ -153,33 +270,32 @@ function renderRawJson(baseline, explanations) {
   if (explanations) $('explanationsEditor').value = JSON.stringify(explanations, null, 2);
 }
 
-function collectChecksToBaseline() {
-  return chrome.storage.local.get('baseline').then(({ baseline }) => {
-    const b = baseline || {};
-    if (!b.lb_baseline) b.lb_baseline = {};
-    const origSpec = b.lb_baseline.spec || {};
-    const newSpec = {};
+async function collectChecksToBaseline() {
+  const config = await getTenantConfig(selectedTenant);
+  const b = config.baseline || {};
+  if (!b.lb_baseline) b.lb_baseline = {};
+  const origSpec = b.lb_baseline.spec || {};
+  const newSpec = {};
 
-    const allKeys = new Set(CHECK_REGISTRY.map((c) => c.key));
-    for (const [k, v] of Object.entries(origSpec)) {
-      if (!allKeys.has(k)) newSpec[k] = v;
+  const allKeys = new Set(CHECK_REGISTRY.map((c) => c.key));
+  for (const [k, v] of Object.entries(origSpec)) {
+    if (!allKeys.has(k)) newSpec[k] = v;
+  }
+
+  const toggles = $('checksContainer').querySelectorAll('input[type="checkbox"]');
+  for (const t of toggles) {
+    if (t.checked) {
+      newSpec[t.dataset.key] = origSpec[t.dataset.key] ?? {};
     }
+  }
 
-    const toggles = $('checksContainer').querySelectorAll('input[type="checkbox"]');
-    for (const t of toggles) {
-      if (t.checked) {
-        newSpec[t.dataset.key] = origSpec[t.dataset.key] ?? {};
-      }
-    }
+  const wafName = $('wafPolicyName').value.trim();
+  if ('app_firewall' in newSpec) {
+    newSpec.app_firewall = wafName ? { name: wafName } : {};
+  }
 
-    const wafName = $('wafPolicyName').value.trim();
-    if ('app_firewall' in newSpec) {
-      newSpec.app_firewall = wafName ? { name: wafName } : {};
-    }
-
-    b.lb_baseline.spec = newSpec;
-    return b;
-  });
+  b.lb_baseline.spec = newSpec;
+  return b;
 }
 
 function collectExemptionMap() {
@@ -199,65 +315,66 @@ function collectExemptionMap() {
 }
 
 async function resetAllToDefaults() {
-  const [baselineResp, explanationsResp, exemptionResp] = await Promise.all([
-    fetch(chrome.runtime.getURL('assets/baseline_lb_http.json')),
-    fetch(chrome.runtime.getURL('assets/explanations.json')),
-    fetch(chrome.runtime.getURL('assets/exemption_map.json')),
-  ]);
-  const baseline = await baselineResp.json();
-  const explanations = await explanationsResp.json();
-  const exemptionMap = await exemptionResp.json();
+  if (selectedTenant) {
+    const keys = ['baseline', 'explanations', 'exemptionMap', 'settings', 'policyOverrides'];
+    await chrome.storage.local.remove(keys.map((k) => tenantKey(selectedTenant, k)));
+  } else {
+    const [baselineResp, explanationsResp, exemptionResp] = await Promise.all([
+      fetch(chrome.runtime.getURL('assets/baseline_lb_http.json')),
+      fetch(chrome.runtime.getURL('assets/explanations.json')),
+      fetch(chrome.runtime.getURL('assets/exemption_map.json')),
+    ]);
+    await chrome.storage.local.set({
+      baseline: await baselineResp.json(),
+      explanations: await explanationsResp.json(),
+      exemptionMap: await exemptionResp.json(),
+    });
+  }
 
-  await chrome.storage.local.set({
-    baseline,
-    explanations,
-    exemptionMap,
-    settings: { autoAudit: true },
-  });
-  await chrome.storage.local.remove('policyOverrides');
-
-  renderChecks(baseline);
-  renderPolicies();
-  renderExemptionMap(exemptionMap);
-  renderRawJson(baseline, explanations);
-  $('autoAudit').checked = true;
+  await loadTenantConfig();
 }
 
 function bindEvents() {
+  $('tenantSelect').addEventListener('change', async () => {
+    selectedTenant = $('tenantSelect').value || null;
+    await chrome.storage.local.set({ lastSelectedTenant: selectedTenant });
+    await loadTenantConfig();
+  });
+
   $('resetAll').addEventListener('click', async () => {
-    if (!confirm('Reset all settings to defaults? This will clear any customizations and namespace policy overrides.')) return;
+    const target = selectedTenant || 'global defaults';
+    if (!confirm(`Reset all settings for ${target} to defaults? This will clear any customizations and namespace policy overrides.`)) return;
     await resetAllToDefaults();
     showStatus('resetAllStatus', 'All settings reset to defaults', 'success');
   });
 
   $('saveChecks').addEventListener('click', async () => {
     const baseline = await collectChecksToBaseline();
-    await chrome.storage.local.set({ baseline });
+    await setTenantData('baseline', baseline);
     renderRawJson(baseline, null);
     showStatus('checksStatus', 'Saved', 'success');
   });
 
   $('resetChecks').addEventListener('click', async () => {
-    const resp = await fetch(chrome.runtime.getURL('assets/baseline_lb_http.json'));
-    const baseline = await resp.json();
-    await chrome.storage.local.set({ baseline });
-    renderChecks(baseline);
-    renderPolicies();
-    renderRawJson(baseline, null);
+    if (selectedTenant) {
+      await removeTenantData('baseline');
+    } else {
+      const resp = await fetch(chrome.runtime.getURL('assets/baseline_lb_http.json'));
+      await chrome.storage.local.set({ baseline: await resp.json() });
+    }
+    await loadTenantConfig();
     showStatus('checksStatus', 'Reset to defaults', 'success');
   });
 
   $('fetchDefaultPolicies').addEventListener('click', async () => {
-    const tabs = await chrome.tabs.query({ url: 'https://*.console.ves.volterra.io/*' });
-    if (!tabs.length) {
-      showStatus('policiesStatus', 'No XC console tab open. Open the XC console first.', 'error');
-      return;
-    }
     showStatus('policiesStatus', 'Fetching...', 'success');
     try {
-      const resp = await chrome.tabs.sendMessage(tabs[0].id, {
-        type: 'GET_POLICIES', namespace: 'default',
-      });
+      const resp = await sendToXcTab({ type: 'GET_POLICIES', namespace: 'default' });
+
+      if (resp?.error) {
+        showStatus('policiesStatus', resp.error, 'error');
+        return;
+      }
       if (resp?.policies) {
         const policies = resp.policies.service_policies || resp.policies;
         const display = $('currentPolicies');
@@ -271,24 +388,27 @@ function bindEvents() {
         }
         showStatus('policiesStatus', 'Fetched successfully', 'success');
       } else {
-        showStatus('policiesStatus', resp?.error || 'Failed to fetch', 'error');
+        showStatus('policiesStatus', 'Failed to fetch', 'error');
       }
     } catch {
-      showStatus('policiesStatus', 'Could not reach the XC console tab.', 'error');
+      showStatus('policiesStatus', 'Could not reach the XC console tab. Open the XC console first.', 'error');
     }
   });
 
   $('saveExemptions').addEventListener('click', async () => {
     const exemptionMap = collectExemptionMap();
-    await chrome.storage.local.set({ exemptionMap });
+    await setTenantData('exemptionMap', exemptionMap);
     showStatus('exemptionStatus', 'Saved', 'success');
   });
 
   $('resetExemptions').addEventListener('click', async () => {
-    const resp = await fetch(chrome.runtime.getURL('assets/exemption_map.json'));
-    const exemptionMap = await resp.json();
-    await chrome.storage.local.set({ exemptionMap });
-    renderExemptionMap(exemptionMap);
+    if (selectedTenant) {
+      await removeTenantData('exemptionMap');
+    } else {
+      const resp = await fetch(chrome.runtime.getURL('assets/exemption_map.json'));
+      await chrome.storage.local.set({ exemptionMap: await resp.json() });
+    }
+    await loadTenantConfig();
     showStatus('exemptionStatus', 'Reset to defaults', 'success');
   });
 
@@ -299,19 +419,11 @@ function bindEvents() {
     const labels = Object.keys(map).map((code) => ({
       key: `xc-audit-${code}`,
       value: 'true',
+      description: `Exempts load balancer from ${map[code].label} audit checks`,
     }));
 
-    const tabs = await chrome.tabs.query({ url: 'https://*.console.ves.volterra.io/*' });
-    if (!tabs.length) {
-      showStatus('exemptionStatus', 'No XC console tab open. Open the XC console first.', 'error');
-      return;
-    }
-
     try {
-      const response = await chrome.tabs.sendMessage(tabs[0].id, {
-        type: 'REGISTER_LABELS',
-        labels,
-      });
+      const response = await sendToXcTab({ type: 'REGISTER_LABELS', labels });
 
       if (response?.error) {
         showStatus('exemptionStatus', response.error, 'error');
@@ -338,11 +450,69 @@ function bindEvents() {
     }
   });
 
+  $('deleteLabels').addEventListener('click', async () => {
+    const tenantLabel = selectedTenant ? shortTenantName(selectedTenant) : 'XC';
+    if (!confirm(`Delete all xc-audit labels from ${tenantLabel}? This cannot be undone.`)) return;
+    showStatus('exemptionStatus', 'Deleting labels...', 'success');
+
+    const map = collectExemptionMap();
+    const labels = Object.keys(map).map((code) => ({
+      key: `xc-audit-${code}`,
+      value: 'true',
+    }));
+
+    try {
+      const response = await sendToXcTab({ type: 'DELETE_LABELS', labels });
+
+      if (response?.error) {
+        showStatus('exemptionStatus', response.error, 'error');
+        return;
+      }
+
+      const r = response?.results || [];
+      const deleted = r.filter((x) => x.status === 'deleted').length;
+      const notFound = r.filter((x) => x.status === 'not_found').length;
+      const errItems = r.filter((x) => x.status === 'error');
+
+      const parts = [];
+      if (deleted) parts.push(`${deleted} deleted`);
+      if (notFound) parts.push(`${notFound} not found`);
+      if (errItems.length) parts.push(`${errItems.length} failed`);
+
+      let msg = `Labels: ${parts.join(', ')}`;
+      if (errItems.length) {
+        msg += '\n' + errItems.map((e) => `  ${e.key}: ${e.detail}`).join('\n');
+      }
+      showStatus('exemptionStatus', msg, errItems.length ? 'error' : 'success');
+    } catch {
+      showStatus('exemptionStatus', 'Could not reach the XC console tab. Refresh the page and try again.', 'error');
+    }
+  });
+
+  $('planSelect').addEventListener('change', async () => {
+    const config = await getTenantConfig(selectedTenant);
+    renderAddons({ ...config.settings, plan: $('planSelect').value });
+  });
+
   $('saveSettings').addEventListener('click', async () => {
+    const plan = $('planSelect').value;
+    const config = await getTenantConfig(selectedTenant);
+    const update = { ...(config.settings || {}), plan };
+    if (plan !== 'enterprise') {
+      const addonToggles = $('addonsContainer').querySelectorAll('input[type="checkbox"]');
+      update.addons = [...addonToggles].filter((t) => t.checked).map((t) => t.dataset.addonKey);
+    }
+    delete update.autoAudit;
+    await setTenantData('settings', update);
+    showStatus('settingsStatus', 'Plan settings saved', 'success');
+  });
+
+  $('saveOtherSettings').addEventListener('click', async () => {
+    const { settings: existing } = await chrome.storage.local.get('settings');
     await chrome.storage.local.set({
-      settings: { autoAudit: $('autoAudit').checked },
+      settings: { ...existing, autoAudit: $('autoAudit').checked },
     });
-    showStatus('settingsStatus', 'Settings saved', 'success');
+    showStatus('otherSettingsStatus', 'Settings saved', 'success');
   });
 
   $('saveRawJson').addEventListener('click', async () => {
@@ -351,9 +521,10 @@ function bindEvents() {
       $('baselineError').textContent = '';
       const explanations = JSON.parse($('explanationsEditor').value);
       $('explanationsError').textContent = '';
-      await chrome.storage.local.set({ baseline, explanations });
+      await setTenantData('baseline', baseline);
+      await setTenantData('explanations', explanations);
       renderChecks(baseline);
-      renderPolicies(baseline);
+      renderPolicies();
       showStatus('rawStatus', 'Saved', 'success');
     } catch (e) {
       showStatus('rawStatus', `Invalid JSON: ${e.message}`, 'error');

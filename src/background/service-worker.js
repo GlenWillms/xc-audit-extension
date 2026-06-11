@@ -1,4 +1,4 @@
-import { runFullAudit } from '../lib/audit-engine.js';
+import { runFullAudit, groupByCategory } from '../lib/audit-engine.js';
 
 const tabData = {};
 
@@ -55,7 +55,16 @@ chrome.commands.onCommand.addListener((command) => {
   if (command === 'reload-extension') chrome.runtime.reload();
 });
 
+let checkCategories = [];
+
+async function loadCategories() {
+  const resp = await fetch(chrome.runtime.getURL('assets/check-categories.json'));
+  checkCategories = await resp.json();
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
+  await loadCategories();
+
   const existing = await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'settings']);
 
   const [baselineResp, explanationsResp, exemptionResp] = await Promise.all([
@@ -71,13 +80,79 @@ chrome.runtime.onInstalled.addListener(async () => {
   };
 
   const toSet = {};
-  if (!existing.baseline) toSet.baseline = defaults.baseline;
+  if (!existing.baseline) {
+    toSet.baseline = defaults.baseline;
+  } else {
+    const merged = { ...existing.baseline };
+    const defaultInspectors = defaults.baseline.inspector_baselines || {};
+    const existingInspectors = merged.inspector_baselines || {};
+    let changed = false;
+    for (const [key, val] of Object.entries(defaultInspectors)) {
+      if (!(key in existingInspectors)) {
+        existingInspectors[key] = val;
+        changed = true;
+      }
+    }
+    if (changed) {
+      merged.inspector_baselines = existingInspectors;
+      toSet.baseline = merged;
+    }
+  }
   if (!existing.explanations) toSet.explanations = defaults.explanations;
   if (!existing.exemptionMap) toSet.exemptionMap = defaults.exemptionMap;
   if (!existing.settings) toSet.settings = { autoAudit: true };
 
   if (Object.keys(toSet).length) await chrome.storage.local.set(toSet);
+
+  const { knownTenants = [] } = await chrome.storage.local.get('knownTenants');
+  const tenantUpdates = {};
+  for (const t of knownTenants) {
+    const key = tenantKey(t, 'baseline');
+    const data = await chrome.storage.local.get(key);
+    const tenantBaseline = data[key];
+    if (tenantBaseline) {
+      const tenantInspectors = tenantBaseline.inspector_baselines || {};
+      let changed = false;
+      for (const [k, v] of Object.entries(defaults.baseline.inspector_baselines || {})) {
+        if (!(k in tenantInspectors)) {
+          tenantInspectors[k] = v;
+          changed = true;
+        }
+      }
+      if (changed) {
+        tenantBaseline.inspector_baselines = tenantInspectors;
+        tenantUpdates[key] = tenantBaseline;
+      }
+    }
+  }
+  if (Object.keys(tenantUpdates).length) await chrome.storage.local.set(tenantUpdates);
 });
+
+loadCategories();
+
+// --- Tenant-scoped storage ---
+
+function tenantKey(tenant, key) {
+  return `tenant:${tenant}:${key}`;
+}
+
+async function getTenantConfig(tenant) {
+  const keys = ['baseline', 'explanations', 'exemptionMap', 'settings', 'policyOverrides'];
+  const allKeys = [...keys.map((k) => tenantKey(tenant, k)), ...keys];
+  const data = await chrome.storage.local.get(allKeys);
+  const result = {};
+  for (const k of keys) {
+    result[k] = data[tenantKey(tenant, k)] ?? data[k];
+  }
+  return result;
+}
+
+async function trackTenant(tenant) {
+  const { knownTenants = [] } = await chrome.storage.local.get('knownTenants');
+  if (!knownTenants.includes(tenant)) {
+    await chrome.storage.local.set({ knownTenants: [...knownTenants, tenant] });
+  }
+}
 
 // --- Hashing for version-based cache ---
 
@@ -106,11 +181,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === 'SAVE_POLICY_OVERRIDE') {
-    savePolicyOverride(message.namespace, message.policies).then(sendResponse);
+    savePolicyOverride(message.tenant, message.namespace, message.policies).then(sendResponse);
     return true;
   }
   if (message.type === 'CLEAR_POLICY_OVERRIDE') {
-    clearPolicyOverride(message.namespace).then(sendResponse);
+    clearPolicyOverride(message.tenant, message.namespace).then(sendResponse);
     return true;
   }
   if (message.type === 'CHECK_VERSIONS') {
@@ -135,7 +210,7 @@ function buildCacheKey(tenant, namespace, managedTenant) {
 }
 
 async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersions }) {
-  const { baseline, exemptionMap } = await chrome.storage.local.get(['baseline', 'exemptionMap']);
+  const { baseline, exemptionMap } = await getTenantConfig(tenant);
   const currentHash = await hashJson({ baseline, exemptionMap });
 
   const cacheKey = buildCacheKey(tenant, namespace, managedTenant);
@@ -161,9 +236,9 @@ async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersion
   return { stale, fresh };
 }
 
-async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions }, forceRefresh) {
-  const { baseline, explanations, exemptionMap, policyOverrides } =
-    await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'policyOverrides']);
+async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects }, forceRefresh) {
+  await trackTenant(tenant);
+  const { baseline, explanations, exemptionMap, policyOverrides, settings } = await getTenantConfig(tenant);
 
   if (!baseline) {
     return { type: 'AUDIT_ERROR', error: 'INVALID_BASELINE', message: 'No baseline configured.' };
@@ -182,8 +257,38 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
     policies,
     effectiveBaseline,
     explanations || {},
-    exemptionMap || {}
+    exemptionMap || {},
+    referencedObjects || {}
   );
+
+  if (checkCategories.length) {
+    const plan = settings?.plan || 'essentials';
+    const enabledAddons = new Set(settings?.addons || []);
+
+    function isActiveForPlan(checkPlan, checkKey) {
+      if (checkPlan === 'essentials') return true;
+      if (checkPlan === 'enterprise') return plan === 'enterprise';
+      if (checkPlan === 'addon') return plan === 'enterprise' || enabledAddons.has(checkKey);
+      return false;
+    }
+
+    for (const lbResult of results.loadBalancers) {
+      lbResult.categorized = groupByCategory(lbResult, checkCategories);
+      lbResult.plan = plan;
+      lbResult.addons = [...enabledAddons];
+
+      const activeDiffs = lbResult.diffs.filter((d) => {
+        const topKey = d.path.split('.')[1];
+        const check = checkCategories.flatMap((c) => c.checks).find((c) => c.key === topKey);
+        return isActiveForPlan(check?.plan, check?.key) && check?.required !== false;
+      });
+      const activeInspections = (lbResult.inspections || []).filter((i) => {
+        const check = checkCategories.flatMap((c) => c.checks).find((c) => c.inspector === i.inspector);
+        return isActiveForPlan(check?.plan, check?.key);
+      });
+      lbResult.pass = activeDiffs.length === 0 && activeInspections.every((i) => i.pass);
+    }
+  }
 
   const currentHash = await hashJson({ baseline, exemptionMap });
   const cacheKey = buildCacheKey(tenant, namespace, managedTenant);
@@ -212,17 +317,21 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
   return { type: 'AUDIT_RESULTS', data: results };
 }
 
-async function savePolicyOverride(namespace, policies) {
-  const { policyOverrides = {} } = await chrome.storage.local.get('policyOverrides');
-  policyOverrides[namespace] = policies;
-  await chrome.storage.local.set({ policyOverrides });
+async function savePolicyOverride(tenant, namespace, policies) {
+  const key = tenant ? tenantKey(tenant, 'policyOverrides') : 'policyOverrides';
+  const data = await chrome.storage.local.get(key);
+  const overrides = data[key] || {};
+  overrides[namespace] = policies;
+  await chrome.storage.local.set({ [key]: overrides });
   return { ok: true };
 }
 
-async function clearPolicyOverride(namespace) {
-  const { policyOverrides = {} } = await chrome.storage.local.get('policyOverrides');
-  delete policyOverrides[namespace];
-  await chrome.storage.local.set({ policyOverrides });
+async function clearPolicyOverride(tenant, namespace) {
+  const key = tenant ? tenantKey(tenant, 'policyOverrides') : 'policyOverrides';
+  const data = await chrome.storage.local.get(key);
+  const overrides = data[key] || {};
+  delete overrides[namespace];
+  await chrome.storage.local.set({ [key]: overrides });
   return { ok: true };
 }
 

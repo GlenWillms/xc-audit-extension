@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "F5 XC Namespace Audit",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Compliance audit overlay for F5 Distributed Cloud HTTP Load Balancers",
   "permissions": [
     "storage",
     "activeTab",
     "webRequest",
     "tabs",
-    "cookies"
+    "cookies",
+    "scripting"
   ],
   "host_permissions": [
     "https://*.console.ves.volterra.io/*"
