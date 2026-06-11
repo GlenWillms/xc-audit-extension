@@ -11,6 +11,8 @@ A browser extension that audits HTTP Load Balancers in F5 Distributed Cloud (XC)
 - **Dynamic policy baseline** — automatically uses the `default` namespace's service policies as the baseline, with per-namespace overrides
 - **Version-based caching** — only re-audits LBs whose configuration has changed
 - **Register labels in XC** — create known label keys directly from the extension settings
+- **HTML tenant report** — generate a downloadable report covering all audited namespaces with executive summary and recommendations
+- **Tenant branding** — reports include the tenant's logo and company name
 
 ## Installation
 
@@ -202,7 +204,28 @@ Click the extension icon to open the popup. It shows:
 - **Service Policies**: collapsible detail with per-namespace override button
 - **Load Balancers**: summary count + per-LB collapsible details showing passed, failed, and skipped checks
 - **Re-Audit**: forces a fresh audit (clears cache)
+- **Report**: opens the report generator page
 - **Settings**: opens the options page
+
+## HTML Report
+
+Generate a self-contained HTML report covering all namespaces you've audited in the current session.
+
+### How to Use
+
+1. Visit multiple namespace LB list pages so the extension caches audit results for each
+2. Click **Report** in the popup (or open `src/report/report.html` from the extensions page)
+3. Select the tenant and choose which namespaces to include
+4. Click **Generate Report** to preview, then **Download HTML** to save
+
+### Report Contents
+
+- **Header** — tenant logo and company name (fetched automatically from the XC tenant settings API)
+- **Executive Summary** — total namespaces, LB counts, compliance percentage, and per-category breakdown
+- **Per-Namespace Sections** — service policy status and per-LB categorized findings with collapsible details
+- **Recommendations** — actionable items aggregated across all LBs, sorted by severity and frequency, with remediation steps
+
+The report is fully self-contained (inline CSS, no external dependencies) and prints cleanly. Only namespaces visited in the current browser session are available — the report uses cached audit data and makes no additional API calls.
 
 ## Keyboard Shortcuts
 
@@ -235,10 +258,13 @@ src/
     content-style.css      # Inline badge and detail row styles
   lib/
     audit-engine.js        # Diff engine, exemption logic
+    report-builder.js      # HTML report generator (pure function)
     url-parser.js          # XC URL pattern matching
   options/
     options.html/js/css     # Settings page with visual template builder
   popup/
     popup.html/js/css       # Extension popup
+  report/
+    report.html/js/css      # Report generator page
 manifest.json              # Chrome extension manifest (MV3)
 ```

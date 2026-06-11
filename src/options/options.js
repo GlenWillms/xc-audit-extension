@@ -130,12 +130,13 @@ function renderAddons(settings) {
   container.innerHTML = '';
   const plan = settings.plan || 'essentials';
 
-  if (plan === 'enterprise') {
+  const isEnterprise = plan === 'enterprise';
+
+  if (isEnterprise) {
     const hint = document.createElement('p');
     hint.className = 'hint';
     hint.textContent = 'All add-ons are included with the Enterprise plan.';
     container.appendChild(hint);
-    return;
   }
 
   const addons = CHECK_CATEGORIES.flatMap((cat) =>
@@ -147,7 +148,8 @@ function renderAddons(settings) {
     row.className = 'toggle-row';
     const toggle = document.createElement('input');
     toggle.type = 'checkbox';
-    toggle.checked = enabledAddons.includes(addon.key);
+    toggle.checked = isEnterprise || enabledAddons.includes(addon.key);
+    toggle.disabled = isEnterprise;
     toggle.dataset.addonKey = addon.key;
     const span = document.createElement('span');
     span.textContent = addon.label;

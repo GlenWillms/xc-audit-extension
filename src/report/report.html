@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>F5 XC Audit — Generate Report</title>
+  <link rel="stylesheet" href="report.css">
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <h1>F5 XC Audit Report Generator</h1>
+      <span class="version" id="version"></span>
+    </div>
+
+    <div class="notice" id="notice">
+      This report includes only namespaces you have visited and audited in this browser session. Visit more namespace LB pages to include them.
+    </div>
+
+    <div class="controls">
+      <div class="control-group">
+        <label for="tenantSelect">Tenant</label>
+        <select id="tenantSelect"></select>
+      </div>
+
+      <div class="control-group">
+        <label>Namespaces <span class="ns-count" id="nsCount"></span></label>
+        <div class="ns-actions">
+          <button class="btn btn-sm btn-secondary" id="selectAll">Select All</button>
+          <button class="btn btn-sm btn-secondary" id="selectNone">Select None</button>
+        </div>
+        <div class="ns-list" id="nsList">
+          <div class="empty-state">Select a tenant to see audited namespaces.</div>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="generate" disabled>Generate Report</button>
+        <button class="btn btn-secondary" id="download" disabled>Download HTML</button>
+      </div>
+    </div>
+
+    <div id="previewContainer" style="display:none">
+      <h2>Preview</h2>
+      <iframe id="preview" sandbox="allow-same-origin"></iframe>
+    </div>
+  </div>
+
+  <script type="module" src="report.js"></script>
+</body>
+</html>

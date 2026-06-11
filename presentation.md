@@ -109,7 +109,8 @@ The popup provides a summary view:
 - Service policy comparison
 - Per-LB expandable details
 - **Re-Audit** button to force a fresh check
-- **Settings** link for configuration
+- **Report** -- generate a tenant-wide HTML report
+- **Settings** -- opens configuration (auto-selects active tenant)
 
 ---
 
@@ -191,8 +192,31 @@ Per-namespace overrides available if a namespace intentionally differs.
 
 ---
 
+## HTML Tenant Report
+
+Generate a downloadable report covering all audited namespaces in a tenant.
+
+1. Visit namespace LB list pages to collect audit data
+2. Click **Report** in the popup
+3. Select namespaces to include, click **Generate Report**
+4. Preview the report, then **Download HTML**
+
+---
+
+## Report Contents
+
+- **Tenant branding** -- logo and company name fetched from the XC tenant settings API
+- **Executive summary** -- compliance %, LB pass/warning counts, per-category breakdown
+- **Per-namespace sections** -- service policy status + categorized LB findings
+- **Recommendations** -- aggregated, deduplicated, sorted by severity then frequency, with remediation steps
+
+Self-contained HTML with no external dependencies. Prints cleanly.
+
+---
+
 ## Settings Page
 
+- **Plan & Add-ons** -- select Essentials/Enterprise, toggle add-on checks (visible on all plans)
 - **Baseline Checks** -- toggle individual checks on/off with a visual builder
 - **App Firewall Policy** -- set the expected WAF policy name
 - **Service Policy Overrides** -- manage per-namespace policy baselines
@@ -252,6 +276,7 @@ No build step, no dependencies, no API keys.
 | Baseline LB override | Reference LB in default namespace |
 | Plan tier awareness | Essentials / Enterprise / Add-on |
 | Policy comparison | Auto-compare against default namespace |
+| Tenant-wide HTML report | Executive summary + recommendations |
 | Zero configuration auth | Uses browser session |
 | Efficient | Version-based caching |
 

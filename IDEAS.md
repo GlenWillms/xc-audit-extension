@@ -26,9 +26,9 @@ Add a UI to apply exemption labels to multiple LBs at once, rather than labeling
 
 Background monitoring that periodically re-audits and sends a browser notification when an LB's compliance status changes (e.g., goes from PASS to FAIL).
 
-## Namespace-Level Summary Dashboard
+## ~~Namespace-Level Summary Dashboard~~ ✅ Implemented
 
-A full-page dashboard (new tab) showing compliance status across all namespaces the user has access to, rather than one namespace at a time.
+Implemented as the **HTML Report** feature. Click **Report** in the popup to generate a downloadable report covering all audited namespaces with executive summary, per-namespace details, and prioritized recommendations. Reports include tenant branding (logo and company name).
 
 ## CDN Load Balancer Support
 

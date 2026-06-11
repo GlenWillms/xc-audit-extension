@@ -87,6 +87,13 @@
         return `${apiPrefix}${path}?report_fields&csrf=${csrf}`;
       }
 
+      const tenantMetaKey = `tenant:${tenant}:meta`;
+      const tenantMetaCache = await chrome.storage.local.get(tenantMetaKey);
+      let tenantMeta = tenantMetaCache[tenantMetaKey] || null;
+      if (!tenantMeta) {
+        tenantMeta = await fetchTenantMeta(csrf, managedTenant);
+      }
+
       const [policies, defaultPolicies, lbListResp] = await Promise.all([
         fetch(apiUrl(`/api/config/namespaces/${namespace}/active_service_policies`))
           .then((r) => (r.ok ? r.json() : null))
@@ -155,7 +162,7 @@
         {
           type: force ? 'FORCE_RUN_AUDIT' : 'RUN_AUDIT',
           tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects,
-          baselineLbConfigs, baselineLbReferencedObjects,
+          baselineLbConfigs, baselineLbReferencedObjects, tenantMeta,
         },
         (response) => {
           if (chrome.runtime.lastError) return;
@@ -503,6 +510,30 @@
     banner.className = 'xc-audit-setup-banner';
     banner.textContent = 'F5 XC Audit: Session expired or not logged in. Please log in to the F5 XC console.';
     document.body.prepend(banner);
+  }
+
+  async function fetchTenantMeta(csrf, managedTenant) {
+    try {
+      const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
+      const resp = await fetch(`${apiPrefix}/api/web/namespaces/system/tenant/settings?csrf=${csrf}`);
+      if (!resp.ok) return {};
+      const data = await resp.json();
+      const companyName = data.company_name || null;
+
+      let logoDataUrl = null;
+      const imgs = document.querySelectorAll('img[src^="data:image"]');
+      for (const img of imgs) {
+        if (img.closest('[class*="sidebar"], [class*="header"], [class*="nav"], [class*="logo"], [class*="brand"]')) {
+          logoDataUrl = img.src;
+          break;
+        }
+      }
+      if (!logoDataUrl && imgs.length) logoDataUrl = imgs[0].src;
+
+      return { companyName, logoDataUrl };
+    } catch {
+      return {};
+    }
   }
 
   async function fetchPolicies(namespace) {

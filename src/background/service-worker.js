@@ -236,8 +236,11 @@ async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersion
   return { stale, fresh };
 }
 
-async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects, baselineLbConfigs, baselineLbReferencedObjects }, forceRefresh) {
+async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects, baselineLbConfigs, baselineLbReferencedObjects, tenantMeta }, forceRefresh) {
   await trackTenant(tenant);
+  if (tenantMeta && Object.keys(tenantMeta).length) {
+    await chrome.storage.local.set({ [tenantKey(tenant, 'meta')]: tenantMeta });
+  }
   const { baseline, explanations, exemptionMap, policyOverrides, settings } = await getTenantConfig(tenant);
 
   if (!baseline) {

@@ -13,12 +13,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   const lbSummary = document.getElementById('lbSummary');
   const notOnPage = document.getElementById('notOnPage');
 
-  document.getElementById('openOptions').addEventListener('click', () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const url = tab?.url || '';
+
+  const activeTenant = url.match(/^https:\/\/([^.]+)\.console\.ves\.volterra\.io\//)?.[1] || null;
+
+  document.getElementById('openOptions').addEventListener('click', async () => {
+    if (activeTenant) await chrome.storage.local.set({ lastSelectedTenant: activeTenant });
     chrome.runtime.openOptionsPage();
   });
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url = tab?.url || '';
+  document.getElementById('openReport').addEventListener('click', async () => {
+    if (activeTenant) await chrome.storage.local.set({ lastSelectedTenant: activeTenant });
+    chrome.tabs.create({ url: chrome.runtime.getURL('src/report/report.html') });
+  });
   const match = url.match(XC_URL_PATTERN);
 
   if (!match || !LB_LIST_PATH.test(match[4])) {
