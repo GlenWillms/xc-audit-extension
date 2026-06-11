@@ -473,7 +473,7 @@
       if (requiredWarningCount) parts.push(`${requiredWarningCount} warnings`);
       if (recommendedCount) parts.push(`${recommendedCount} recommended`);
       if (skipCount) parts.push(`${skipCount} skipped`);
-      badge.textContent = (result.pass ? 'PASS' : 'WARNING') + (parts.length ? ` (${parts.join(', ')})` : '');
+      badge.textContent = (result.pass ? '✅' : '⚠️') + (parts.length ? ` (${parts.join(', ')})` : '');
       badge.title = 'Click to toggle details';
 
       const detailRow = buildDetailRow(result);

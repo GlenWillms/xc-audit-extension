@@ -104,7 +104,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const policyDetail = document.createElement('details');
       policyDetail.className = `lb-detail ${data.policies.pass ? 'lb-pass' : 'lb-warning'}`;
       const policySummary = document.createElement('summary');
-      policySummary.textContent = `Service Policies: ${data.policies.pass ? 'PASS' : 'WARNING'}`;
+      policySummary.textContent = `Service Policies: ${data.policies.pass ? '✅' : '⚠️'}`;
       if (!data.policies.pass) policySummary.textContent += ` (${data.policies.diffs.length})`;
       policyDetail.appendChild(policySummary);
 
@@ -221,7 +221,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (recommendedCount) parts.push(`${recommendedCount} recommended`);
       if (skipCount) parts.push(`${skipCount} skipped`);
       const refNote = lb.baselineLb ? ` [ref: ${lb.baselineLb}]` : '';
-      summary.textContent = `${lb.pass ? '✓' : '✗'} ${lb.name}${refNote} (${parts.join(', ')})`;
+      summary.textContent = `${lb.pass ? '✅' : '⚠️'} ${lb.name}${refNote} (${parts.join(', ')})`;
       lbEl.appendChild(summary);
 
       if (lb.categorized?.length) {
