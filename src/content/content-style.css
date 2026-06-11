@@ -11,6 +11,19 @@
   line-height: 1.4;
 }
 
+.xc-audit-loading {
+  background-color: #e2e3e5;
+  color: #41464b;
+  border: 1px solid #d3d6d8;
+  cursor: default;
+  animation: xc-audit-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes xc-audit-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .xc-audit-pass {
   background-color: #d4edda;
   color: #155724;

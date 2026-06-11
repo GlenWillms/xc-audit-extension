@@ -179,13 +179,19 @@
     });
   }
 
+  function clearLoading() {
+    if (loadingObserver) { loadingObserver.disconnect(); loadingObserver = null; }
+    document.querySelectorAll('.xc-audit-loading').forEach((el) => el.remove());
+  }
+
   async function requestAudit(tenant, namespace, managedTenant, force) {
     try {
       currentManagedTenant = managedTenant;
+      showLoadingBadges();
 
       if (!force) {
         const csrf = await getCsrf();
-        if (!csrf) return;
+        if (!csrf) { clearLoading(); return; }
         const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
         const lbListResp = await fetch(`${apiPrefix}/api/config/namespaces/${namespace}/http_loadbalancers?report_fields&csrf=${csrf}`);
         if (!lbListResp.ok) throw new Error(`API ${lbListResp.status}`);
@@ -218,8 +224,11 @@
       if (response?.type === 'AUDIT_RESULTS') {
         auditResults = response.data;
         observeAndInject();
+      } else {
+        clearLoading();
       }
     } catch (err) {
+      clearLoading();
       if (err.message?.includes('401') || err.message?.includes('403')) {
         showSessionBanner();
       }
@@ -235,7 +244,8 @@
       const resp = await fetch(`${apiPrefix}/api/web/namespaces?csrf=${csrf}`);
       if (!resp.ok) return { error: `API ${resp.status}` };
       const data = await resp.json();
-      const namespaces = (data.items || []).map((ns) => ns.name).filter(Boolean);
+      const EXCLUDED_NS = new Set(['shared', 'system']);
+      const namespaces = (data.items || []).map((ns) => ns.name).filter((n) => n && !EXCLUDED_NS.has(n));
       return { namespaces };
     } catch (err) {
       return { error: err.message };
@@ -306,7 +316,36 @@
     return refs;
   }
 
+  let loadingObserver = null;
+
+  function showLoadingBadges() {
+    injectLoadingBadgesOnce();
+
+    if (loadingObserver) loadingObserver.disconnect();
+    const contentArea = document.querySelector('[class*="content"]') || document.body;
+    let loadingDebounce = null;
+    loadingObserver = new MutationObserver(() => {
+      if (loadingDebounce) clearTimeout(loadingDebounce);
+      loadingDebounce = setTimeout(injectLoadingBadgesOnce, 150);
+    });
+    loadingObserver.observe(contentArea, { childList: true, subtree: true });
+  }
+
+  function injectLoadingBadgesOnce() {
+    if (auditResults) return;
+    const rows = findLbRows();
+    for (const { wrapper, nameEl } of rows) {
+      if (wrapper.querySelector('.xc-audit-badge') || wrapper.querySelector('.xc-audit-loading')) continue;
+      const badge = document.createElement('span');
+      badge.className = 'xc-audit-badge xc-audit-loading';
+      badge.textContent = '⏳ Auditing...';
+      nameEl.insertAdjacentElement('afterend', badge);
+    }
+  }
+
   function observeAndInject() {
+    if (loadingObserver) { loadingObserver.disconnect(); loadingObserver = null; }
+    document.querySelectorAll('.xc-audit-loading').forEach((el) => el.remove());
     injectBadges();
 
     const contentArea = document.querySelector('[class*="content"]') || document.body;
@@ -730,6 +769,7 @@
   }
 
   function removeAllBadges() {
+    if (loadingObserver) { loadingObserver.disconnect(); loadingObserver = null; }
     document.querySelectorAll('.xc-audit-badge, .xc-audit-detail-row, .xc-audit-setup-banner').forEach((el) => el.remove());
     auditResults = null;
   }
