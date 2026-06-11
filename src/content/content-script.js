@@ -311,8 +311,8 @@
         html += `<div class="xc-audit-category">`;
         html += `<div class="xc-audit-category-header">${escapeHtml(cat.label)}</div>`;
 
-        if (cat.failed.length) {
-          for (const d of cat.failed) {
+        if (cat.warnings.length) {
+          for (const d of cat.warnings) {
             html += buildDiffHtml(d, cat.checks, planCtx);
           }
         }
@@ -376,8 +376,8 @@
       }
     } else {
       if (result.diffs.length) {
-        html += `<div class="xc-audit-section xc-audit-section-fail">`;
-        html += `<div class="xc-audit-section-header">Failed (${result.diffs.length})</div>`;
+        html += `<div class="xc-audit-section xc-audit-section-warning">`;
+        html += `<div class="xc-audit-section-header">Warnings (${result.diffs.length})</div>`;
         for (const d of result.diffs) { html += buildDiffHtml(d); }
         html += `</div>`;
       }
@@ -424,17 +424,17 @@
       const skipCount = result.skipped?.length || 0;
       const passCount = activePassed.length;
       const recommendedCount = activeDiffs.filter((d) => d.required === false).length;
-      const requiredFailCount = activeDiffs.filter((d) => d.required !== false).length +
+      const requiredWarningCount = activeDiffs.filter((d) => d.required !== false).length +
         activeInspections.filter((i) => !i.pass).length;
       const badge = document.createElement('span');
-      badge.className = `xc-audit-badge ${result.pass ? 'xc-audit-pass' : 'xc-audit-fail'}`;
+      badge.className = `xc-audit-badge ${result.pass ? 'xc-audit-pass' : 'xc-audit-warning'}`;
 
       const parts = [];
       if (passCount) parts.push(`${passCount} passed`);
-      if (requiredFailCount) parts.push(`${requiredFailCount} failed`);
+      if (requiredWarningCount) parts.push(`${requiredWarningCount} warnings`);
       if (recommendedCount) parts.push(`${recommendedCount} recommended`);
       if (skipCount) parts.push(`${skipCount} skipped`);
-      badge.textContent = (result.pass ? 'PASS' : 'FAIL') + (parts.length ? ` (${parts.join(', ')})` : '');
+      badge.textContent = (result.pass ? 'PASS' : 'WARNING') + (parts.length ? ` (${parts.join(', ')})` : '');
       badge.title = 'Click to toggle details';
 
       const detailRow = buildDetailRow(result);

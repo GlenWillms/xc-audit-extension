@@ -83,28 +83,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function renderResults(data) {
-    const failCount = data.loadBalancers.filter((lb) => !lb.pass).length;
-    const passCount = data.loadBalancers.length - failCount;
+    const warningCount = data.loadBalancers.filter((lb) => !lb.pass).length;
+    const passCount = data.loadBalancers.length - warningCount;
 
-    if (failCount === 0) {
+    if (warningCount === 0) {
       statusIcon.className = 'icon green';
       statusText.textContent = 'All checks passed';
     } else {
       statusIcon.className = 'icon red';
-      statusText.textContent = `${failCount} issue(s) found`;
+      statusText.textContent = `${warningCount} issue(s) found`;
     }
 
     resultsEl.style.display = 'block';
-    lbSummary.textContent = `Load Balancers: ${passCount} pass, ${failCount} fail (${data.loadBalancers.length} total)`;
-    lbSummary.className = `result-item ${failCount > 0 ? 'result-fail' : 'result-pass'}`;
+    lbSummary.textContent = `Load Balancers: ${passCount} pass, ${warningCount} warning (${data.loadBalancers.length} total)`;
+    lbSummary.className = `result-item ${warningCount > 0 ? 'result-warning' : 'result-pass'}`;
 
     if (data.policies) {
       policyResult.style.display = 'block';
       policyResult.innerHTML = '';
       const policyDetail = document.createElement('details');
-      policyDetail.className = `lb-detail ${data.policies.pass ? 'lb-pass' : 'lb-fail'}`;
+      policyDetail.className = `lb-detail ${data.policies.pass ? 'lb-pass' : 'lb-warning'}`;
       const policySummary = document.createElement('summary');
-      policySummary.textContent = `Service Policies: ${data.policies.pass ? 'PASS' : 'FAIL'}`;
+      policySummary.textContent = `Service Policies: ${data.policies.pass ? 'PASS' : 'WARNING'}`;
       if (!data.policies.pass) policySummary.textContent += ` (${data.policies.diffs.length})`;
       policyDetail.appendChild(policySummary);
 
@@ -196,7 +196,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     detailsEl.innerHTML = '';
     for (const lb of data.loadBalancers) {
       const lbEl = document.createElement('details');
-      lbEl.className = `lb-detail ${lb.pass ? 'lb-pass' : 'lb-fail'}`;
+      lbEl.className = `lb-detail ${lb.pass ? 'lb-pass' : 'lb-warning'}`;
 
       const plan = lb.plan || 'essentials';
       const addons = new Set(lb.addons || []);
@@ -212,12 +212,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       const skipCount = lb.skipped?.length || 0;
       const passCount = activePassed.length;
       const recommendedCount = activeDiffs.filter((d) => d.required === false).length;
-      const requiredFailCount = activeDiffs.filter((d) => d.required !== false).length +
+      const requiredWarningCount = activeDiffs.filter((d) => d.required !== false).length +
         activeInspections.filter((i) => !i.pass).length;
       const summary = document.createElement('summary');
       const parts = [];
       if (passCount) parts.push(`${passCount} passed`);
-      if (requiredFailCount) parts.push(`${requiredFailCount} failed`);
+      if (requiredWarningCount) parts.push(`${requiredWarningCount} warnings`);
       if (recommendedCount) parts.push(`${recommendedCount} recommended`);
       if (skipCount) parts.push(`${skipCount} skipped`);
       summary.textContent = `${lb.pass ? '✓' : '✗'} ${lb.name} (${parts.join(', ')})`;
@@ -236,7 +236,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           const list = document.createElement('ul');
           list.className = 'diff-list';
 
-          for (const d of cat.failed) {
+          for (const d of cat.warnings) {
             const check = cat.checks?.find((c) => d.path.split('.')[1] === c.key);
             const displayName = check?.label || d.path;
             const isOptional = d.required === false;
@@ -248,7 +248,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               if (check?.description) li.dataset.tooltip = check.description;
               li.textContent = `${displayName} — ${tag}`;
             } else {
-              li.className = `diff-item ${isOptional ? 'diff-recommended' : 'diff-fail'}`;
+              li.className = `diff-item ${isOptional ? 'diff-recommended' : 'diff-warning'}`;
               if (check?.description) li.dataset.tooltip = check.description;
               let text = isOptional ? `${displayName} — recommended` : displayName;
               if (d.type === 'MISSING') {
@@ -287,7 +287,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
               for (const d of insp.diffs) {
                 const li = document.createElement('li');
-                li.className = 'diff-item diff-fail';
+                li.className = 'diff-item diff-warning';
                 if (inspCheck?.description) li.dataset.tooltip = inspCheck.description;
                 li.textContent = inspLabel;
                 if (d.type !== 'MISSING') {
@@ -358,7 +358,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         list.className = 'diff-list';
         for (const d of lb.diffs) {
           const li = document.createElement('li');
-          li.className = 'diff-item diff-fail';
+          li.className = 'diff-item diff-warning';
           let text = d.path;
           if (d.type === 'MISSING') {
             text += ' — missing';

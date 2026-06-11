@@ -349,9 +349,9 @@ export function runFullAudit(lbConfigs, policyConfig, baseline, explanations, ex
         return !skippedKeys.has(sentinelKey);
       });
 
-      const failedKeys = new Set(diffs.map((d) => d.path.split('.')[1]));
+      const warningKeys = new Set(diffs.map((d) => d.path.split('.')[1]));
       const passed = Object.keys(diffSpec)
-        .filter((k) => !failedKeys.has(k))
+        .filter((k) => !warningKeys.has(k))
         .map((k) => ({ key: k, path: `spec.${k}` }));
 
       results.loadBalancers.push({
@@ -374,7 +374,7 @@ export function groupByCategory(lbResult, categories) {
     label: cat.label,
     checks: cat.checks,
     passed: [],
-    failed: [],
+    warnings: [],
     skipped: [],
     inspections: [],
   }));
@@ -384,7 +384,7 @@ export function groupByCategory(lbResult, categories) {
     const cat = grouped.find((g) => g.checks.some((c) => c.key === topKey));
     if (cat) {
       const check = cat.checks.find((c) => c.key === topKey);
-      cat.failed.push({ ...diff, required: check?.required !== false, plan: check?.plan || 'essentials' });
+      cat.warnings.push({ ...diff, required: check?.required !== false, plan: check?.plan || 'essentials' });
     }
   }
 
@@ -413,6 +413,6 @@ export function groupByCategory(lbResult, categories) {
   }
 
   return grouped.filter(
-    (g) => g.passed.length || g.failed.length || g.skipped.length || g.inspections.length
+    (g) => g.passed.length || g.warnings.length || g.skipped.length || g.inspections.length
   );
 }

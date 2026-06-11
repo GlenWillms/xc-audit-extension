@@ -345,11 +345,11 @@ async function clearPolicyOverride(tenant, namespace) {
 }
 
 function updateBadge(results) {
-  const failCount = results.loadBalancers.filter((lb) => !lb.pass).length +
+  const warningCount = results.loadBalancers.filter((lb) => !lb.pass).length +
     (results.policies && !results.policies.pass ? 1 : 0);
 
-  if (failCount > 0) {
-    chrome.action.setBadgeText({ text: String(failCount) });
+  if (warningCount > 0) {
+    chrome.action.setBadgeText({ text: String(warningCount) });
     chrome.action.setBadgeBackgroundColor({ color: '#dc3545' });
   } else {
     chrome.action.setBadgeText({ text: '✓' });
