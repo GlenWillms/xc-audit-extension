@@ -336,6 +336,7 @@ function bindEvents() {
         checkCategories: catResp.categories || catResp,
         plans: catResp.plans || {},
         tierLabels: catResp.tierLabels || {},
+        owaspCategories: catResp.owaspCategories || null,
         explanations: config.explanations || {},
         generatedAt: timeStr,
         version: chrome.runtime.getManifest().version,

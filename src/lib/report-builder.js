@@ -62,6 +62,7 @@ function buildRecommendations(namespaces, checkCategories, explanations) {
             key: fKey, count: 0, namespaces: new Set(), label: check.label,
             description: check.description, required: check.required !== false,
             category: check.category, plan: check.plan,
+            owasp: check.owasp || null,
             explanation: explanations[d.path] || null,
           };
         }
@@ -83,6 +84,7 @@ function buildRecommendations(namespaces, checkCategories, explanations) {
             key: fKey, count: 0, namespaces: new Set(), label: check.label,
             description: check.description, required: check.required !== false,
             category: check.category, plan: check.plan,
+            owasp: check.owasp || null,
             explanation: explKey ? (explanations[explKey] || null) : null,
           };
         }
@@ -112,6 +114,111 @@ function buildRecommendations(namespaces, checkCategories, explanations) {
     .map((f) => ({ ...f, namespaces: [...f.namespaces], totalLbs }));
 }
 
+function buildOwaspSummary(namespaces, checkCategories, owaspCategories) {
+  if (!owaspCategories) return '';
+
+  const checkMap = new Map();
+  for (const cat of checkCategories) {
+    for (const check of cat.checks) {
+      checkMap.set(check.key, check);
+    }
+  }
+
+  const owaspStatus = {};
+  for (const [code, meta] of Object.entries(owaspCategories)) {
+    const primaryChecks = [];
+    const secondaryChecks = [];
+    for (const [key, check] of checkMap) {
+      if (!check.owasp) continue;
+      if (check.owasp.primary?.includes(code)) primaryChecks.push(check);
+      if (check.owasp.secondary?.includes(code)) secondaryChecks.push(check);
+    }
+    owaspStatus[code] = { meta, primaryChecks, secondaryChecks, totalFailing: 0, totalChecked: 0 };
+  }
+
+  for (const ns of namespaces) {
+    for (const lb of ns.loadBalancers) {
+      const plan = lb.result.plan || 'essentials';
+      const addons = lb.result.addons || [];
+      const failingKeys = new Set();
+
+      for (const d of lb.result.diffs || []) {
+        const topKey = d.path.split('.')[1];
+        const check = checkMap.get(topKey);
+        if (check && isActiveForPlan(d.plan || check.plan || 'essentials', plan, addons, check.key)) {
+          failingKeys.add(check.key);
+        }
+      }
+      for (const insp of lb.result.inspections || []) {
+        if (insp.pass) continue;
+        for (const [, check] of checkMap) {
+          if (check.inspector === insp.inspector && isActiveForPlan(insp.plan || check.plan || 'essentials', plan, addons, check.key)) {
+            failingKeys.add(check.key);
+          }
+        }
+      }
+
+      for (const [code, entry] of Object.entries(owaspStatus)) {
+        const activeChecks = entry.primaryChecks.filter(c =>
+          isActiveForPlan(c.plan || 'essentials', plan, addons, c.key));
+        if (activeChecks.length > 0) {
+          entry.totalChecked++;
+          if (activeChecks.some(c => failingKeys.has(c.key))) entry.totalFailing++;
+        }
+      }
+    }
+  }
+
+  let rows = '';
+  for (const [code, entry] of Object.entries(owaspStatus)) {
+    const { meta, primaryChecks, secondaryChecks, totalFailing, totalChecked } = entry;
+    let status, statusClass;
+
+    if (meta.scope === 'out-of-scope') {
+      status = 'Out of Scope';
+      statusClass = 'owasp-oos';
+    } else if (meta.scope === 'limited') {
+      status = 'Limited';
+      statusClass = 'owasp-limited';
+    } else if (totalChecked === 0) {
+      status = 'N/A';
+      statusClass = 'owasp-oos';
+    } else if (totalFailing === 0) {
+      status = 'Covered';
+      statusClass = 'owasp-covered';
+    } else if (totalFailing < totalChecked) {
+      status = 'Partial';
+      statusClass = 'owasp-partial';
+    } else {
+      status = 'Gaps';
+      statusClass = 'owasp-gaps';
+    }
+
+    const allChecks = [
+      ...primaryChecks.map(c => escapeHtml(c.label)),
+      ...secondaryChecks.map(c => escapeHtml(c.label) + '*'),
+    ];
+    const checksCell = allChecks.length > 0 ? allChecks.join(', ') : '&mdash;';
+    const noteHtml = meta.note ? `<div class="owasp-note">${escapeHtml(meta.note)}</div>` : '';
+
+    rows += `<tr>
+      <td><strong>${escapeHtml(code)}</strong></td>
+      <td>${escapeHtml(meta.label)}</td>
+      <td class="owasp-status-cell"><span class="owasp-status ${statusClass}">${status}</span></td>
+      <td class="owasp-checks-cell">${checksCell}${noteHtml}</td>
+    </tr>`;
+  }
+
+  return `<div class="owasp-section">
+<h3>OWASP Top 10:2025 Coverage</h3>
+<table class="owasp-table">
+<thead><tr><th style="width:50px">Code</th><th>Category</th><th style="width:80px;text-align:center">Status</th><th>Mapped Checks</th></tr></thead>
+<tbody>${rows}</tbody>
+</table>
+<div class="owasp-legend">* = secondary mapping</div>
+</div>`;
+}
+
 function buildCategorySummary(namespaces, checkCategories) {
   const summary = checkCategories.map((cat) => ({
     id: cat.id, label: cat.label, pass: 0, warn: 0, skip: 0,
@@ -131,6 +238,11 @@ function buildCategorySummary(namespaces, checkCategories) {
     }
   }
   return summary;
+}
+
+function owaspBadges(check) {
+  if (!check?.owasp?.primary?.length) return '';
+  return ' ' + check.owasp.primary.map(c => `<span class="owasp-badge">${escapeHtml(c)}</span>`).join(' ');
 }
 
 function buildLbHtml(result, checkCategories) {
@@ -171,7 +283,7 @@ function buildLbHtml(result, checkCategories) {
       } else {
         html += `<div class="finding ${isOptional ? 'finding-rec' : 'finding-warn'}">`;
         if (isOptional) html += `<span class="rec-badge">Recommended</span> `;
-        html += escapeHtml(label);
+        html += escapeHtml(label) + owaspBadges(check);
         if (d.type === 'MISSING') {
           html += isOptional ? '' : ' &mdash; missing';
         } else {
@@ -190,10 +302,10 @@ function buildLbHtml(result, checkCategories) {
         const tag = planTagLabel(insp.plan || inspCheck?.plan);
         html += `<span class="tag tag-unavail">${escapeHtml(inspLabel)} &mdash; ${tag}</span>`;
       } else if (insp.pass) {
-        html += `<span class="tag tag-pass">${escapeHtml(inspLabel)}</span>`;
+        html += `<span class="tag tag-pass">${escapeHtml(inspLabel)}${owaspBadges(inspCheck)}</span>`;
       } else {
         for (const d of insp.diffs) {
-          html += `<div class="finding finding-warn">${escapeHtml(inspLabel)}`;
+          html += `<div class="finding finding-warn">${escapeHtml(inspLabel)}${owaspBadges(inspCheck)}`;
           if (d.type === 'MISSING') html += ' &mdash; missing';
           else html += ` &mdash; expected: <code>${escapeHtml(fmt(d.expected))}</code>, found: <code>${escapeHtml(fmt(d.found))}</code>`;
           if (d.explanation) html += `<div class="finding-reason">${escapeHtml(d.explanation.reason)}</div>`;
@@ -221,7 +333,7 @@ function buildLbHtml(result, checkCategories) {
     for (const s of cat.skipped) {
       const check = cat.checks?.find((c) => c.key === s.key);
       const label = check?.label || s.label;
-      html += `<span class="tag tag-skip">${escapeHtml(label)} &mdash; Ignored by Label</span>`;
+      html += `<span class="tag tag-skip">${escapeHtml(label)}${owaspBadges(check)} &mdash; Ignored by Label</span>`;
     }
 
     for (const p of cat.passed) {
@@ -232,7 +344,7 @@ function buildLbHtml(result, checkCategories) {
         const tag = planTagLabel(p.plan || check?.plan);
         html += `<span class="tag tag-unavail">${escapeHtml(label)} &mdash; ${tag}</span>`;
       } else {
-        html += `<span class="tag tag-pass">${escapeHtml(label)}</span>`;
+        html += `<span class="tag tag-pass">${escapeHtml(label)}${owaspBadges(check)}</span>`;
       }
     }
 
@@ -251,7 +363,7 @@ function buildLbHtml(result, checkCategories) {
   return html;
 }
 
-export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, checkCategories, plans, tierLabels, explanations, generatedAt, version }) {
+export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, checkCategories, plans, tierLabels, owaspCategories, explanations, generatedAt, version }) {
   initPlanData(plans, tierLabels);
   const displayName = companyName || tenant;
   const totalLbs = namespaces.reduce((sum, ns) => sum + ns.loadBalancers.length, 0);
@@ -262,6 +374,7 @@ export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, 
   const compliancePct = totalLbs > 0 ? Math.round((passLbs / totalLbs) * 100) : 100;
 
   const catSummary = buildCategorySummary(namespaces, checkCategories);
+  const owaspHtml = buildOwaspSummary(namespaces, checkCategories, owaspCategories);
   const recommendations = buildRecommendations(namespaces, checkCategories, explanations);
 
   let namespaceSections = '';
@@ -323,6 +436,9 @@ export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, 
       recsHtml += `<div class="rec-header">`;
       recsHtml += `<span class="rec-label">${escapeHtml(rec.label)}</span>`;
       recsHtml += `<span class="rec-sev ${rec.required ? 'rec-required' : 'rec-optional'}">${rec.required ? 'Required' : 'Recommended'}</span>`;
+      if (rec.owasp?.primary?.length) {
+        recsHtml += rec.owasp.primary.map(c => ` <span class="owasp-badge">${escapeHtml(c)}</span>`).join('');
+      }
       recsHtml += `</div>`;
       recsHtml += `<div class="rec-impact">Affects ${rec.count} of ${rec.totalLbs} load balancer${rec.totalLbs === 1 ? '' : 's'} across ${nsCount} namespace${nsCount === 1 ? '' : 's'}</div>`;
       if (rec.description) recsHtml += `<div class="rec-desc">${escapeHtml(rec.description)}</div>`;
@@ -424,6 +540,22 @@ td.skip { color: var(--skip-fg); }
 .rec-action { font-size: 13px; color: var(--pass-fg); background: var(--pass-bg); padding: 6px 10px; border-radius: 4px; }
 .all-clear { color: var(--pass-fg); background: var(--pass-bg); padding: 12px; border-radius: 6px; font-size: 14px; }
 
+.owasp-section { background: #f8f9fa; border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin-bottom: 24px; }
+.owasp-section h3 { margin-bottom: 10px; }
+.owasp-table { font-size: 12px; }
+.owasp-table td { vertical-align: top; padding: 6px 10px; }
+.owasp-checks-cell { font-size: 11px; color: #555; }
+.owasp-note { font-size: 10px; color: #888; font-style: italic; margin-top: 2px; }
+.owasp-status { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; }
+.owasp-covered { background: var(--pass-bg); color: var(--pass-fg); }
+.owasp-partial { background: var(--skip-bg); color: var(--skip-fg); }
+.owasp-gaps { background: var(--warn-bg); color: var(--warn-fg); }
+.owasp-limited { background: #e2e3e5; color: #41464b; }
+.owasp-oos { background: #f8f9fa; color: #adb5bd; }
+.owasp-legend { font-size: 10px; color: #888; margin-top: 6px; font-style: italic; }
+.owasp-badge { display: inline-block; font-size: 9px; font-weight: 600; padding: 1px 4px; border-radius: 2px; background: #e7e8ec; color: #495057; margin-left: 3px; vertical-align: middle; letter-spacing: 0.2px; }
+.owasp-status-cell { text-align: center; }
+
 .report-header { display: flex; align-items: center; gap: 16px; margin-bottom: 4px; }
 .tenant-logo { max-height: 48px; max-width: 200px; object-fit: contain; }
 .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 11px; color: #999; text-align: center; }
@@ -433,6 +565,7 @@ td.skip { color: var(--skip-fg); }
   .lb-detail[open] summary ~ .lb-body { break-inside: avoid; }
   .rec-item { break-inside: avoid; }
   .ns-section { break-before: auto; }
+  .owasp-section { break-inside: avoid; }
 }
 </style>
 </head>
@@ -460,6 +593,8 @@ ${logoDataUrl ? `<img src="${logoDataUrl}" class="tenant-logo" alt="">` : ''}
 <tbody>${catSummaryRows}</tbody>
 </table>
 </div>
+
+${owaspHtml}
 
 ${namespaceSections}
 
