@@ -564,7 +564,7 @@ td.skip { color: var(--skip-fg); }
 .owasp-badge { display: inline-block; font-size: 9px; font-weight: 600; padding: 1px 4px; border-radius: 2px; background: #e7e8ec; color: #495057; margin-left: 3px; vertical-align: middle; letter-spacing: 0.2px; }
 .owasp-status-cell { text-align: center; }
 
-.report-header { display: flex; align-items: center; gap: 16px; margin-bottom: 4px; }
+.report-header { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 4px; }
 .tenant-logo { max-height: 48px; max-width: 200px; object-fit: contain; }
 .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 11px; color: #999; text-align: center; }
 
