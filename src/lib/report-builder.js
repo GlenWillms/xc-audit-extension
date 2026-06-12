@@ -8,17 +8,26 @@ function fmt(val) {
   return String(val);
 }
 
+let _planIncludes = {};
+let _planLabels = {};
+let _tierLabels = {};
+
+function initPlanData(plans, tierLabels) {
+  _planIncludes = {};
+  _planLabels = {};
+  for (const [id, def] of Object.entries(plans || {})) {
+    _planIncludes[id] = def.includes || [];
+    if (def.label) _planLabels[id] = def.label;
+  }
+  _tierLabels = tierLabels || {};
+}
+
 function isActiveForPlan(checkPlan, plan, addons, checkKey) {
-  if (checkPlan === 'essentials') return true;
-  if (checkPlan === 'enterprise') return plan === 'enterprise';
-  if (checkPlan === 'addon') return addons?.includes(checkKey);
-  return false;
+  return (_planIncludes[plan] || ['essentials']).includes(checkPlan) || addons?.includes(checkKey);
 }
 
 function planTagLabel(checkPlan) {
-  if (checkPlan === 'enterprise') return 'Enterprise';
-  if (checkPlan === 'addon') return 'Add-on';
-  return null;
+  return _tierLabels[checkPlan] || _planLabels[checkPlan] || null;
 }
 
 function buildRecommendations(namespaces, checkCategories, explanations) {
@@ -202,6 +211,8 @@ function buildLbHtml(result, checkCategories) {
       if (!active) {
         const tag = planTagLabel(o.plan || check?.plan);
         html += `<span class="tag tag-unavail">${escapeHtml(label)} &mdash; ${tag}</span>`;
+      } else if (o.overrideStatus === 'not_in_baseline') {
+        html += `<span class="tag tag-info">${escapeHtml(label)} &mdash; not in baseline</span>`;
       } else {
         html += `<span class="tag tag-pass">${escapeHtml(label)} &mdash; via ${escapeHtml(result.baselineLb)}</span>`;
       }
@@ -240,7 +251,8 @@ function buildLbHtml(result, checkCategories) {
   return html;
 }
 
-export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, checkCategories, explanations, generatedAt, version }) {
+export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, checkCategories, plans, tierLabels, explanations, generatedAt, version }) {
+  initPlanData(plans, tierLabels);
   const displayName = companyName || tenant;
   const totalLbs = namespaces.reduce((sum, ns) => sum + ns.loadBalancers.length, 0);
   const warningLbs = namespaces.reduce(

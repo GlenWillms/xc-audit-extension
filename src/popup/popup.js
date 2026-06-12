@@ -6,6 +6,16 @@ const LB_LIST_PATH = /manage\/load[_-]?balancers\/http[_-]?load[_-]?balancers\/?
 document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('version').textContent = 'v' + chrome.runtime.getManifest().version;
 
+  let popupPlanIncludes = {};
+  let popupTierLabels = {};
+  try {
+    const catData = await fetch(chrome.runtime.getURL('assets/check-categories.json')).then((r) => r.json());
+    for (const [id, def] of Object.entries(catData.plans || {})) {
+      popupPlanIncludes[id] = def.includes || [];
+    }
+    popupTierLabels = catData.tierLabels || {};
+  } catch {}
+
   const statusIcon = document.getElementById('statusIcon');
   const statusText = document.getElementById('statusText');
   const resultsEl = document.getElementById('results');
@@ -212,12 +222,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const plan = lb.plan || 'essentials';
       const addons = new Set(lb.addons || []);
-      const isActive = (checkPlan, checkKey) => {
-        if (checkPlan === 'essentials') return true;
-        if (checkPlan === 'enterprise') return plan === 'enterprise';
-        if (checkPlan === 'addon') return addons.has(checkKey);
-        return false;
-      };
+      const included = new Set(popupPlanIncludes[plan] || ['essentials']);
+      const isActive = (checkPlan, checkKey) => included.has(checkPlan) || addons.has(checkKey);
       const activeDiffs = lb.diffs.filter((d) => isActive(d.plan || 'essentials', d.key));
       const activeInspections = (lb.inspections || []).filter((i) => isActive(i.plan || 'essentials', i.key));
       const activePassed = (lb.passed || []).filter((p) => isActive(p.plan || 'essentials', p.key));
@@ -256,7 +262,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const active = isActive(d.plan || check?.plan || 'essentials', check?.key);
             const li = document.createElement('li');
             if (!active) {
-              const tag = (d.plan || check?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+              const tag = popupTierLabels[d.plan || check?.plan] || 'Enterprise';
               li.className = 'diff-item diff-unavailable';
               if (check?.description) li.dataset.tooltip = check.description;
               li.textContent = `${displayName} — ${tag}`;
@@ -285,7 +291,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const inspLabel = inspCheck?.label || insp.refName;
             const active = isActive(insp.plan || inspCheck?.plan || 'essentials', inspCheck?.key);
             if (!active) {
-              const tag = (insp.plan || inspCheck?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+              const tag = popupTierLabels[insp.plan || inspCheck?.plan] || 'Enterprise';
               const li = document.createElement('li');
               li.className = 'diff-item diff-unavailable';
               if (inspCheck?.description) li.dataset.tooltip = inspCheck.description;
@@ -327,10 +333,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             const active = isActive(o.plan || check?.plan || 'essentials', check?.key);
             const li = document.createElement('li');
             if (!active) {
-              const tag = (o.plan || check?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+              const tag = popupTierLabels[o.plan || check?.plan] || 'Enterprise';
               li.className = 'diff-item diff-unavailable';
               if (check?.description) li.dataset.tooltip = check.description;
               li.textContent = `${label} — ${tag}`;
+            } else if (o.overrideStatus === 'not_in_baseline') {
+              li.className = 'diff-item diff-info';
+              if (check?.description) li.dataset.tooltip = check.description;
+              li.textContent = `${label} — not in baseline`;
             } else {
               li.className = 'diff-item diff-pass';
               if (check?.description) li.dataset.tooltip = check.description;
@@ -357,7 +367,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               const active = isActive(p.plan || check?.plan || 'essentials', check?.key);
               const li = document.createElement('li');
               if (!active) {
-                const tag = (p.plan || check?.plan) === 'addon' ? 'Add-on' : 'Enterprise';
+                const tag = popupTierLabels[p.plan || check?.plan] || 'Enterprise';
                 li.className = 'diff-item diff-unavailable';
                 if (check?.description) li.dataset.tooltip = check.description;
                 li.textContent = `${check?.label || p.key} — ${tag}`;

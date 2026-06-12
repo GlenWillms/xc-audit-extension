@@ -56,14 +56,30 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 let checkCategories = [];
+let planIncludes = {};
+let planMeta = { tierLabels: {}, planLabels: {}, planIncludes: {} };
+let categoriesReady;
 
 async function loadCategories() {
   const resp = await fetch(chrome.runtime.getURL('assets/check-categories.json'));
-  checkCategories = await resp.json();
+  const data = await resp.json();
+  checkCategories = data.categories || [];
+  planIncludes = {};
+  const tierLabels = data.tierLabels || {};
+  const planLabels = {};
+  const planIncludesArrays = {};
+  for (const [id, def] of Object.entries(data.plans || {})) {
+    planIncludes[id] = new Set(def.includes || []);
+    planIncludesArrays[id] = def.includes || [];
+    if (def.label) planLabels[id] = def.label;
+  }
+  planMeta = { tierLabels, planLabels, planIncludes: planIncludesArrays };
 }
 
+categoriesReady = loadCategories();
+
 chrome.runtime.onInstalled.addListener(async () => {
-  await loadCategories();
+  await categoriesReady;
 
   const existing = await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'settings']);
 
@@ -127,8 +143,6 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
   if (Object.keys(tenantUpdates).length) await chrome.storage.local.set(tenantUpdates);
 });
-
-loadCategories();
 
 // --- Tenant-scoped storage ---
 
@@ -249,6 +263,7 @@ async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersion
 }
 
 async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects, baselineLbConfigs, baselineLbReferencedObjects, tenantMeta }, forceRefresh) {
+  await categoriesReady;
   const tid = compositeId(tenant, managedTenant);
   await trackTenant(tenant, managedTenant);
   if (tenantMeta && Object.keys(tenantMeta).length) {
@@ -290,10 +305,7 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
     const enabledAddons = new Set(settings?.addons || []);
 
     function isActiveForPlan(checkPlan, checkKey) {
-      if (checkPlan === 'essentials') return true;
-      if (checkPlan === 'enterprise') return plan === 'enterprise';
-      if (checkPlan === 'addon') return enabledAddons.has(checkKey);
-      return false;
+      return (planIncludes[plan]?.has(checkPlan)) || enabledAddons.has(checkKey);
     }
 
     for (const lbResult of results.loadBalancers) {
@@ -310,7 +322,8 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
         const check = checkCategories.flatMap((c) => c.checks).find((c) => c.inspector === i.inspector);
         return isActiveForPlan(check?.plan, check?.key);
       });
-      lbResult.pass = activeDiffs.length === 0 && activeInspections.every((i) => i.pass);
+      const hasNotInBaseline = (lbResult.baselineOverrides || []).some((o) => o.overrideStatus === 'not_in_baseline');
+      lbResult.pass = activeDiffs.length === 0 && activeInspections.every((i) => i.pass) && !hasNotInBaseline;
     }
   }
 
@@ -343,11 +356,12 @@ async function handleRunAudit({ tenant, namespace, managedTenant, policies, defa
     baselineHash: currentHash,
     policies: results.policies,
     loadBalancers: lbCache,
+    planMeta,
   };
   await chrome.storage.session.set({ auditCache });
 
   updateBadge(results);
-  return { type: 'AUDIT_RESULTS', data: results };
+  return { type: 'AUDIT_RESULTS', data: results, planMeta };
 }
 
 async function savePolicyOverride(tenant, namespace, policies) {

@@ -3,8 +3,20 @@
   let auditResults = null;
   let debounceTimer = null;
   let currentManagedTenant = null;
+  let planIncludes = {};
+  let planLabels = {};
+  let tierLabels = {};
 
   // --- Initialization ---
+
+  function applyPlanMeta(meta) {
+    if (!meta) return;
+    tierLabels = meta.tierLabels || {};
+    planLabels = meta.planLabels || {};
+    for (const [id, includes] of Object.entries(meta.planIncludes || {})) {
+      planIncludes[id] = includes;
+    }
+  }
 
   function init() {
     checkPage();
@@ -79,6 +91,7 @@
         : `${parsed.tenant}/${parsed.namespace}`;
       const entry = changes.auditCache.newValue?.[cacheKey];
       if (entry) {
+        applyPlanMeta(entry.planMeta);
         const lbs = entry.loadBalancers || {};
         auditResults = {
           policies: entry.policies,
@@ -301,6 +314,7 @@
         (response) => {
           if (chrome.runtime.lastError) { clearLoading(); return; }
           if (response?.type === 'AUDIT_RESULTS') {
+            applyPlanMeta(response.planMeta);
             const data = response.data;
             for (const [name, result] of Object.entries(freshResults)) {
               if (!data.loadBalancers.find((lb) => lb.name === name)) {
@@ -486,16 +500,11 @@
   }
 
   function isActiveForPlan(checkPlan, currentPlan, addons, checkKey) {
-    if (checkPlan === 'essentials') return true;
-    if (checkPlan === 'enterprise') return currentPlan === 'enterprise';
-    if (checkPlan === 'addon') return addons?.includes(checkKey);
-    return false;
+    return (planIncludes[currentPlan] || ['essentials']).includes(checkPlan) || addons?.includes(checkKey);
   }
 
   function planTagLabel(checkPlan) {
-    if (checkPlan === 'enterprise') return 'Enterprise';
-    if (checkPlan === 'addon') return 'Add-on';
-    return null;
+    return tierLabels[checkPlan] || planLabels[checkPlan] || null;
   }
 
   function buildDiffHtml(d, checks, planCtx) {
@@ -580,6 +589,8 @@
             if (!active) {
               const tag = planTagLabel(o.plan || check?.plan);
               html += `<span class="xc-audit-unavailable-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — ${tag}</span>`;
+            } else if (o.overrideStatus === 'not_in_baseline') {
+              html += `<span class="xc-audit-info-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — not in baseline</span>`;
             } else {
               html += `<span class="xc-audit-passed-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — via ${escapeHtml(result.baselineLb)}</span>`;
             }
@@ -669,6 +680,7 @@
       const activeInspections = (result.inspections || []).filter((i) => isActiveForPlan(i.plan || 'essentials', plan, addons, i.key));
       const activePassed = (result.passed || []).filter((p) => isActiveForPlan(p.plan || 'essentials', plan, addons, p.key));
       const skipCount = result.skipped?.length || 0;
+      const notInBaselineCount = (result.baselineOverrides || []).filter((o) => o.overrideStatus === 'not_in_baseline').length;
       const passCount = activePassed.length;
       const recommendedCount = activeDiffs.filter((d) => d.required === false).length;
       const requiredWarningCount = activeDiffs.filter((d) => d.required !== false).length +
@@ -680,6 +692,7 @@
       if (passCount) parts.push(`${passCount} passed`);
       if (requiredWarningCount) parts.push(`${requiredWarningCount} warnings`);
       if (recommendedCount) parts.push(`${recommendedCount} recommended`);
+      if (notInBaselineCount) parts.push(`${notInBaselineCount} not in baseline`);
       if (skipCount) parts.push(`${skipCount} skipped`);
       badge.textContent = (result.pass ? '✅' : '⚠️') + (parts.length ? ` (${parts.join(', ')})` : '');
       badge.title = 'Click to toggle details';

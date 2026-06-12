@@ -46,20 +46,13 @@ function buildCacheKey(compositeId, namespace) {
   return managedTenant ? `${tenant}/${managedTenant}/${namespace}` : `${tenant}/${namespace}`;
 }
 
-const XC_URL_RE = /^https:\/\/([^.]+)\.console\.ves\.volterra\.io\/(?:managed_tenant\/([^/]+)\/)?/;
-
-async function getXcTabTenant() {
-  const tabs = await chrome.tabs.query({ url: XC_TAB_PATTERN });
-  if (!tabs.length) return null;
-  const m = tabs[0].url?.match(XC_URL_RE);
-  if (!m) return null;
-  return { tenant: m[1], managedTenant: m[2] || null };
-}
-
 async function sendToXcTab(message) {
   const tabs = await chrome.tabs.query({ url: XC_TAB_PATTERN });
   if (!tabs.length) return { error: 'No XC console tab open. Open the XC console first.' };
-  const tabId = tabs[0].id;
+  const { tenant: selParent } = parseCompositeId(selectedTenant);
+  const match = tabs.find((t) => t.url?.includes(`${selParent}.console.ves.volterra.io`));
+  if (!match) return { error: `No XC console tab open for ${selParent}. Open the correct tenant console first.` };
+  const tabId = match.id;
   try {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch {
@@ -144,17 +137,12 @@ async function loadNamespaces() {
     }
   }
 
-  const { tenant: selectedParent, managedTenant: mt } = parseCompositeId(selectedTenant);
+  const { managedTenant: mt } = parseCompositeId(selectedTenant);
   let allNamespaces = null;
   let listResp = null;
   try {
-    const tabTenant = await getXcTabTenant();
-    if (tabTenant && tabTenant.tenant === selectedParent) {
-      listResp = await sendToXcTab({ type: 'LIST_NAMESPACES', managedTenant: mt });
-      if (listResp?.namespaces) allNamespaces = listResp.namespaces;
-    } else {
-      listResp = { error: tabTenant ? 'XC console is on a different tenant.' : 'No XC console tab open.' };
-    }
+    listResp = await sendToXcTab({ type: 'LIST_NAMESPACES', managedTenant: mt });
+    if (listResp?.namespaces) allNamespaces = listResp.namespaces;
   } catch {
     listResp = { error: 'Could not reach the XC console tab.' };
   }
@@ -345,7 +333,9 @@ function bindEvents() {
         companyName: selectedMt || tenantMeta.companyName || null,
         logoDataUrl: tenantMeta.logoDataUrl || null,
         namespaces: reportNamespaces,
-        checkCategories: catResp,
+        checkCategories: catResp.categories || catResp,
+        plans: catResp.plans || {},
+        tierLabels: catResp.tierLabels || {},
         explanations: config.explanations || {},
         generatedAt: timeStr,
         version: chrome.runtime.getManifest().version,

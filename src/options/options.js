@@ -49,7 +49,10 @@ async function removeTenantData(key) {
 async function sendToXcTab(message) {
   const tabs = await chrome.tabs.query({ url: XC_TAB_PATTERN });
   if (!tabs.length) return { error: 'No XC console tab open. Open the XC console first.' };
-  const tabId = tabs[0].id;
+  const { tenant: selParent } = parseCompositeId(selectedTenant);
+  const match = tabs.find((t) => t.url?.includes(`${selParent}.console.ves.volterra.io`));
+  if (!match) return { error: `No XC console tab open for ${selParent}. Open the correct tenant console first.` };
+  const tabId = match.id;
   try {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch {
@@ -67,10 +70,18 @@ async function sendToXcTab(message) {
 
 let CHECK_CATEGORIES = [];
 let CHECK_REGISTRY = [];
+let ADDON_TIERS = [];
+let PLAN_INCLUDES = {};
 
 async function loadCategories() {
   const resp = await fetch(chrome.runtime.getURL('assets/check-categories.json'));
-  CHECK_CATEGORIES = await resp.json();
+  const data = await resp.json();
+  CHECK_CATEGORIES = data.categories || [];
+  ADDON_TIERS = data.addonTiers || [];
+  PLAN_INCLUDES = {};
+  for (const [id, def] of Object.entries(data.plans || {})) {
+    PLAN_INCLUDES[id] = def.includes || [];
+  }
   CHECK_REGISTRY = CHECK_CATEGORIES.flatMap((cat) =>
     cat.checks.map((check) => ({ ...check, category: cat.label, categoryId: cat.id }))
   );
@@ -138,21 +149,23 @@ function renderAddons(settings) {
   container.innerHTML = '';
   const plan = settings.plan || 'essentials';
 
-  const isEnterprise = plan === 'enterprise';
+  const included = new Set(PLAN_INCLUDES[plan] || ['essentials']);
 
   const addons = CHECK_CATEGORIES.flatMap((cat) =>
-    cat.checks.filter((c) => c.plan === 'addon').map((c) => ({ ...c, category: cat.label }))
+    cat.checks.filter((c) => ADDON_TIERS.includes(c.plan)).map((c) => ({ ...c, category: cat.label }))
   );
   const enabledAddons = settings.addons || [];
   for (const addon of addons) {
+    const includedInPlan = included.has(addon.plan);
     const row = document.createElement('label');
     row.className = 'toggle-row';
     const toggle = document.createElement('input');
     toggle.type = 'checkbox';
-    toggle.checked = enabledAddons.includes(addon.key);
+    toggle.checked = includedInPlan || enabledAddons.includes(addon.key);
+    toggle.disabled = includedInPlan;
     toggle.dataset.addonKey = addon.key;
     const span = document.createElement('span');
-    span.textContent = addon.label;
+    span.textContent = addon.label + (includedInPlan ? ' (included)' : '');
     row.appendChild(toggle);
     row.appendChild(span);
     container.appendChild(row);
@@ -424,6 +437,7 @@ function bindEvents() {
       value: 'true',
       description: `Exempts load balancer from ${map[code].label} audit checks`,
     }));
+    labels.push({ key: 'xc-audit-baseline-lb', value: 'true', description: 'Marks this load balancer as the audit baseline' });
 
     try {
       const response = await sendToXcTab({ type: 'REGISTER_LABELS', labels });
@@ -463,6 +477,7 @@ function bindEvents() {
       key: `xc-audit-${code}`,
       value: 'true',
     }));
+    labels.push({ key: 'xc-audit-baseline-lb', value: 'true' });
 
     try {
       const response = await sendToXcTab({ type: 'DELETE_LABELS', labels });

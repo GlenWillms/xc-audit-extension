@@ -36,12 +36,12 @@
   },
   "ignore-bot": {
     "label": "Bot Defense",
-    "keys": ["disable_bot_defense"],
+    "keys": ["bot_defense"],
     "category": "Bot Defense"
   },
   "ignore-csd": {
     "label": "Client-Side Defense",
-    "keys": ["disable_client_side_defense"],
+    "keys": ["client_side_defense"],
     "category": "Bot Defense"
   },
   "ignore-apid": {
@@ -51,7 +51,7 @@
   },
   "ignore-apip": {
     "label": "API Protection",
-    "keys": ["disable_api_definition", "disable_api_testing"],
+    "keys": ["api_specification", "api_testing"],
     "category": "API Security"
   },
   "ignore-sp": {
@@ -63,5 +63,15 @@
     "label": "Sensitive Data Policy",
     "keys": ["default_sensitive_data_policy"],
     "category": "Policy & Data"
+  },
+  "ignore-jwt": {
+    "label": "JWT Validation",
+    "keys": ["jwt_validation"],
+    "category": "API Security"
+  },
+  "ignore-mp": {
+    "label": "Malware Protection",
+    "keys": ["malware_protection_settings"],
+    "category": "Web Application Firewall"
   }
 }

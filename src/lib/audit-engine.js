@@ -37,7 +37,7 @@ export function findDiffs(current, baseline, path = 'spec') {
       }
 
       const newPath = `${path}.${key}`;
-      if (!(key in current)) {
+      if (!(key in current) || current[key] == null) {
         issues.push({
           path: newPath,
           type: 'MISSING',
@@ -516,6 +516,25 @@ export function applyBaselineLbOverrides(results, lbConfigs, baselineLbConfigs, 
     }
     lbResult.inspections = remainingInspections;
 
-    lbResult.pass = lbResult.diffs.length === 0 && lbResult.inspections.every((i) => i.pass);
+    const overriddenKeys = new Set(lbResult.baselineOverrides.map((o) => o.path?.split('.')[1]).filter(Boolean));
+    const warningKeys = new Set(lbResult.diffs.map((d) => d.path.split('.')[1]));
+    const remainingPassed = [];
+    for (const p of lbResult.passed) {
+      if (blbAudit.failedPaths.has(p.path || `spec.${p.key}`) && !overriddenKeys.has(p.key)) {
+        lbResult.baselineOverrides.push({ ...p, overrideStatus: 'not_in_baseline' });
+      } else {
+        remainingPassed.push(p);
+      }
+    }
+    lbResult.passed = remainingPassed;
+
+    for (const insp of lbResult.inspections) {
+      if (insp.pass && blbAudit.failedInspectors.has(insp.inspector)) {
+        lbResult.baselineOverrides.push({ ...insp, overrideStatus: 'not_in_baseline' });
+      }
+    }
+
+    const hasNotInBaseline = lbResult.baselineOverrides.some((o) => o.overrideStatus === 'not_in_baseline');
+    lbResult.pass = lbResult.diffs.length === 0 && lbResult.inspections.every((i) => i.pass) && !hasNotInBaseline;
   }
 }
