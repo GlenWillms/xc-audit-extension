@@ -3,6 +3,14 @@
         "reason": "The active service policies do not match the corporate baseline.",
         "next_step": "Ensure the 'Corporate Block List' and 'Geo Fencing' policies are applied in the correct order."
     },
+    "spec.service_policies_from_namespace": {
+        "reason": "Service policies from the namespace are not configured.",
+        "next_step": "Enable 'Apply service policies from namespace' to enforce centrally managed rules on this load balancer."
+    },
+    "spec.default_sensitive_data_policy": {
+        "reason": "Sensitive Data Policy is not configured.",
+        "next_step": "Enable a Sensitive Data Policy to mask or block exposure of PII, credentials, and other sensitive data in responses."
+    },
     "spec.app_firewall": {
         "reason": "Application firewall is not configured.",
         "next_step": "Assign a Web Application Firewall policy to this load balancer."
@@ -31,9 +39,45 @@
         "reason": "HSTS is not enabled.",
         "next_step": "Enable 'Add HSTS Header' in the TLS configuration."
     },
+    "spec.disable_trust_client_ip_headers": {
+        "reason": "Trusting client-supplied IP headers is enabled.",
+        "next_step": "Disable 'Trust Client IP Headers' to prevent IP spoofing via X-Forwarded-For."
+    },
+    "spec.ddos_mitigation_rules": {
+        "reason": "DDoS mitigation rules are not configured.",
+        "next_step": "Configure DDoS mitigation rules with appropriate thresholds and actions for volumetric attack protection."
+    },
+    "spec.l7_ddos_protection": {
+        "reason": "Layer 7 DDoS protection is not enabled.",
+        "next_step": "Enable L7 DDoS protection to detect and mitigate application-layer flood attacks."
+    },
+    "spec.malware_protection_settings": {
+        "reason": "Malware protection is not configured.",
+        "next_step": "Enable Malware Protection to scan uploaded files for malicious content."
+    },
+    "spec.jwt_validation": {
+        "reason": "JWT Validation is not configured.",
+        "next_step": "Configure JWT Validation on this load balancer to verify tokens on incoming requests."
+    },
     "spec.enable_api_discovery": {
         "reason": "API Discovery is not enabled.",
         "next_step": "Enable API Discovery on this load balancer to comply with baseline."
+    },
+    "spec.api_specification": {
+        "reason": "API Definition is not configured.",
+        "next_step": "Upload an OpenAPI spec and enable API Definition enforcement to validate requests against the specification."
+    },
+    "spec.api_testing": {
+        "reason": "API Testing is not enabled.",
+        "next_step": "Enable API Testing to run automated security scans against discovered API endpoints."
+    },
+    "spec.bot_defense": {
+        "reason": "Bot Defense is not configured.",
+        "next_step": "Enable Bot Defense to detect and block automated threats like credential stuffing and scraping."
+    },
+    "spec.client_side_defense": {
+        "reason": "Client-Side Defense is not configured.",
+        "next_step": "Enable Client-Side Defense to detect and block malicious scripts injected into web pages."
     },
     "spec.advertise_on_public_default_vip": {
         "reason": "The load balancer is not advertising on the public default VIP as per baseline.",

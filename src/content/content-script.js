@@ -571,7 +571,11 @@
               html += `<div class="xc-audit-inspection">`;
               html += `<div class="xc-audit-inspection-header"${inspTooltip ? ` data-tooltip="${escapeHtml(inspTooltip)}"` : ''}>${escapeHtml(inspLabel)} (${insp.diffs.length} issue${insp.diffs.length === 1 ? '' : 's'})</div>`;
               for (const d of insp.diffs) {
-                html += buildDiffHtml(d, null, planCtx);
+                const detail = d.explanation?.reason || (d.type === 'MISSING' ? 'Configuration is missing' :
+                  `Expected: ${fmt(d.expected)}, Found: ${fmt(d.found)}`);
+                html += `<div class="xc-audit-issue"><div class="xc-audit-issue-detail">${escapeHtml(detail)}</div>`;
+                if (d.explanation?.next_step) html += `<div class="xc-audit-fix">${escapeHtml(d.explanation.next_step)}</div>`;
+                html += `</div>`;
               }
               html += `</div>`;
             }

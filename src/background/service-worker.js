@@ -114,7 +114,19 @@ chrome.runtime.onInstalled.addListener(async () => {
       toSet.baseline = merged;
     }
   }
-  if (!existing.explanations) toSet.explanations = defaults.explanations;
+  if (!existing.explanations) {
+    toSet.explanations = defaults.explanations;
+  } else {
+    let explanationsChanged = false;
+    const mergedExplanations = { ...existing.explanations };
+    for (const [key, val] of Object.entries(defaults.explanations)) {
+      if (!mergedExplanations[key]) {
+        mergedExplanations[key] = val;
+        explanationsChanged = true;
+      }
+    }
+    if (explanationsChanged) toSet.explanations = mergedExplanations;
+  }
   if (!existing.exemptionMap) toSet.exemptionMap = defaults.exemptionMap;
   if (!existing.settings) toSet.settings = { autoAudit: true };
 
