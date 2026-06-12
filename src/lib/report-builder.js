@@ -11,6 +11,7 @@ function fmt(val) {
 let _planIncludes = {};
 let _planLabels = {};
 let _tierLabels = {};
+let _owaspCategories = {};
 
 function initPlanData(plans, tierLabels) {
   _planIncludes = {};
@@ -242,7 +243,10 @@ function buildCategorySummary(namespaces, checkCategories) {
 
 function owaspBadges(check) {
   if (!check?.owasp?.primary?.length) return '';
-  return ' ' + check.owasp.primary.map(c => `<span class="owasp-badge">${escapeHtml(c)}</span>`).join(' ');
+  return ' ' + check.owasp.primary.map(c => {
+    const title = _owaspCategories[c]?.label || '';
+    return `<span class="owasp-badge" title="${escapeHtml(title)}">${escapeHtml(c)}</span>`;
+  }).join(' ');
 }
 
 function buildLbHtml(result, checkCategories) {
@@ -365,6 +369,7 @@ function buildLbHtml(result, checkCategories) {
 
 export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, checkCategories, plans, tierLabels, owaspCategories, explanations, generatedAt, version }) {
   initPlanData(plans, tierLabels);
+  _owaspCategories = owaspCategories || {};
   const displayName = companyName || tenant;
   const totalLbs = namespaces.reduce((sum, ns) => sum + ns.loadBalancers.length, 0);
   const warningLbs = namespaces.reduce(
@@ -437,7 +442,10 @@ export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, 
       recsHtml += `<span class="rec-label">${escapeHtml(rec.label)}</span>`;
       recsHtml += `<span class="rec-sev ${rec.required ? 'rec-required' : 'rec-optional'}">${rec.required ? 'Required' : 'Recommended'}</span>`;
       if (rec.owasp?.primary?.length) {
-        recsHtml += rec.owasp.primary.map(c => ` <span class="owasp-badge">${escapeHtml(c)}</span>`).join('');
+        recsHtml += rec.owasp.primary.map(c => {
+          const title = _owaspCategories[c]?.label || '';
+          return ` <span class="owasp-badge" title="${escapeHtml(title)}">${escapeHtml(c)}</span>`;
+        }).join('');
       }
       recsHtml += `</div>`;
       recsHtml += `<div class="rec-impact">Affects ${rec.count} of ${rec.totalLbs} load balancer${rec.totalLbs === 1 ? '' : 's'} across ${nsCount} namespace${nsCount === 1 ? '' : 's'}</div>`;
