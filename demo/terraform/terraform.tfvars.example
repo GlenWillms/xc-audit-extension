@@ -1,0 +1,23 @@
+# F5 XC API credentials
+api_p12_file = "/path/to/api-certificate.p12"
+api_url      = "https://your-tenant.console.ves.volterra.io/api"
+
+# Tenant name (appears in object references)
+tenant_name = "your-tenant-abcdefgh"
+
+# Namespace for shared resources (default: "shared")
+# shared_namespace = "shared"
+
+# -----------------------------------------------------------------------
+# The following are expected as environment variables (not in this file):
+#
+#   export TF_VAR_base_domain="example.com"
+#   export TF_VAR_namecheap_domain="example.com"
+#
+#   export NAMECHEAP_USER_NAME="your-username"
+#   export NAMECHEAP_API_USER="your-username"
+#   export NAMECHEAP_API_KEY="your-api-key"
+#   export NAMECHEAP_CLIENT_IP="your-whitelisted-ip"
+#
+#   export VES_P12_PASSWORD="your-p12-password"
+# -----------------------------------------------------------------------

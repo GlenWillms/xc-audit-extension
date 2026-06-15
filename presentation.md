@@ -282,6 +282,151 @@ No build step, no dependencies, no API keys.
 
 ---
 
+<!-- _class: lead -->
+
+# Live Demo
+
+Four scenarios deployed via Terraform across separate namespaces
+
+---
+
+## Demo Environment
+
+Deployed with `terraform apply` -- fully self-contained, reproducible on any tenant.
+
+**Shared resources** across all scenarios:
+- Origin pool → httpbin.org
+- 3 WAF policies (full / basic / monitoring-only)
+- OFAC geo-block + IP threat intelligence service policies
+- Active service policies per namespace
+- `xc-audit-*` exemption labels registered in `shared` namespace
+
+**DNS**: ACME challenge CNAMEs auto-created in Namecheap
+
+---
+
+## Demo: Compliance Blind Spots
+
+**Namespace:** `audit-demo-workloads`
+
+Five realistic workloads that *look fine* in the console. None are compliant.
+
+| Workload | Looks Like | Hidden Gap |
+|----------|-----------|------------|
+| `ecommerce-storefront` | Full WAF, TLS, DDoS | Trust client IP, no sensitive data policy |
+| `partner-api-gateway` | Strong API security | No WAF -- injection goes unmitigated |
+| `marketing-site` | WAF assigned | WAF in **monitoring mode** -- blocks nothing |
+| `internal-tools` | Deployed and running | HTTP only on a public network |
+| `staging-mirror` | Near-production config | Drifted: trust-IP on, bot defense off |
+
+> Without the tool, these pass a visual check. The audit surfaces every gap.
+
+---
+
+## Demo: Compliance Blind Spots -- Walkthrough
+
+1. Navigate to `audit-demo-workloads` -- all five show **WARNING**
+2. Expand `marketing-site` -- WAF exists but the **blocking mode inspector** caught it
+3. Expand `partner-api-gateway` -- strong API controls, missing WAF category entirely
+4. Expand `ecommerce-storefront` -- subtle gaps hidden behind a solid security posture
+5. Expand `staging-mirror` -- identify the "temporary" testing changes that were never reverted
+6. Expand `internal-tools` -- cascade of failures for the HTTP-only LB
+
+**Key message:** Every one of these would pass a manual review. The tool finds what humans miss.
+
+---
+
+## Demo: Plan-Based Filtering
+
+**Namespace:** `audit-demo-plan`
+
+Same LBs, different results depending on the plan selection.
+
+| LB | Essentials Plan | Enterprise Plan |
+|----|-----------------|-----------------|
+| `app-enterprise-ready` | **PASS** | **PASS** |
+| `app-essentials-only` | **PASS** | **WARN** |
+| `app-minimal` | **WARN** | **WARN** |
+
+---
+
+## Demo: Plan-Based Filtering -- Walkthrough
+
+1. Set extension plan to **Essentials**
+2. Navigate to `audit-demo-plan` -- `app-essentials-only` shows **PASS**
+3. Expand it -- enterprise checks are grayed out as "Unavailable"
+4. Switch plan to **Enterprise** in extension settings
+5. Return to `audit-demo-plan` -- `app-essentials-only` now shows **WARN**
+6. Expand it -- enterprise features (Sensitive Data, API Testing, WAF AI) now appear as active warnings
+
+**Key message:** The audit adapts to what the tenant is licensed for. No false positives for features you haven't purchased.
+
+---
+
+## Demo: Exemption Labels
+
+**Namespace:** `audit-demo-labels`
+
+Three identical LBs. Same config. Different labels. Different results.
+
+| LB | Labels | Result |
+|----|--------|--------|
+| `app-labeled-compliant` | 7 exemption labels | **PASS** (with skipped count) |
+| `app-partial-labels` | 3 exemption labels | **WARN** |
+| `app-no-labels` | None | **WARN** |
+
+---
+
+## Demo: Exemption Labels -- Walkthrough
+
+1. Navigate to `audit-demo-labels` -- compare badge results side-by-side
+2. Expand `app-labeled-compliant` -- all gaps show as **Skipped** with the label that exempted them
+3. Expand `app-no-labels` -- same gaps appear as **Warnings**
+4. Compare the two -- identical configs, different compliance outcomes
+5. Expand `app-partial-labels` -- mix of skipped and failed checks
+
+**Key message:** Labels give teams a governed way to accept risk. Exemptions are visible in the audit, not hidden.
+
+---
+
+## Demo: Baseline LB Overrides
+
+**Namespace:** `audit-demo-baseline`
+
+A reference LB in the `default` namespace defines the expected posture.
+
+| LB | Relationship to Baseline | Result |
+|----|--------------------------|--------|
+| `app-compliant` | Matches exactly | **PASS** |
+| `app-below-baseline` | Missing WAF | **WARN** |
+| `app-above-baseline` | Has extras (bot defense, API discovery) | **WARN** (info) |
+
+---
+
+## Demo: Baseline LB Overrides -- Walkthrough
+
+1. Navigate to `audit-demo-baseline` -- note the `ref: baseline-standard` tags
+2. Expand `app-compliant` -- shows "via baseline-standard" on override tags
+3. Expand `app-below-baseline` -- WAF warning because the baseline *has* WAF
+4. Expand `app-above-baseline` -- "not in baseline" tags for features the baseline should include
+
+**Key message:** The baseline is a real XC object managed through normal workflows. Changes propagate automatically on next audit.
+
+---
+
+## Demo: Generate Report
+
+1. Click **Report** in the extension popup
+2. Select all four demo namespaces
+3. Click **Generate Report**
+4. Walk through the executive summary -- compliance %, per-category breakdown
+5. Show per-namespace sections with detailed findings
+6. Show the recommendations section -- aggregated, deduplicated, sorted by severity
+
+**Key message:** One-click visibility across the entire tenant. Share with stakeholders as a self-contained HTML file.
+
+---
+
 ## Summary
 
 | Capability | How |
