@@ -228,12 +228,7 @@
         return `${apiPrefix}${path}?report_fields&csrf=${csrf}`;
       }
 
-      const tenantMetaKey = `tenant:${managedTenant ? `${tenant}::${managedTenant}` : tenant}:meta`;
-      const tenantMetaCache = await chrome.storage.local.get(tenantMetaKey);
-      let tenantMeta = tenantMetaCache[tenantMetaKey] || null;
-      if (!tenantMeta) {
-        tenantMeta = await fetchTenantMeta(csrf, managedTenant);
-      }
+      let tenantMeta = await fetchTenantMeta(csrf, managedTenant);
       const domLogo = extractLogo();
       if (domLogo) tenantMeta = { ...tenantMeta, logoDataUrl: domLogo };
       if (managedTenant) tenantMeta = { ...tenantMeta, companyName: managedTenant };
@@ -767,8 +762,19 @@
         } else {
           tenantChecks.mfa = { status: 'fail', detail: 'MFA not enforced' };
         }
+      }
+    } catch { /* leave as unknown */ }
 
-        const pwPolicy = data.password_policy || data.login_options?.password_policy;
+    try {
+      const resp = await fetch(`${apiPrefix}/api/web/namespaces/system/tenant/idm/settings?csrf=${csrf}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        console.log('[XC Audit] Tenant IDM settings response:', JSON.stringify(data).slice(0, 3000));
+        if (!managedTenant) {
+          companyName = data.tenant_details?.display_name || companyName;
+        }
+
+        const pwPolicy = data.password_policy;
         if (pwPolicy && Object.keys(pwPolicy).length > 0) {
           tenantChecks.passwordPolicy = { status: 'pass', detail: 'Custom password policy configured' };
         } else {

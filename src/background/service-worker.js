@@ -156,6 +156,22 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (Object.keys(tenantUpdates).length) await chrome.storage.local.set(tenantUpdates);
 });
 
+async function ensureDefaults() {
+  const existing = await chrome.storage.local.get(['baseline', 'explanations', 'exemptionMap', 'settings']);
+  if (existing.baseline && existing.explanations && existing.exemptionMap) return;
+  const [baselineResp, explanationsResp, exemptionResp] = await Promise.all([
+    fetch(chrome.runtime.getURL('assets/baseline_lb_http.json')),
+    fetch(chrome.runtime.getURL('assets/explanations.json')),
+    fetch(chrome.runtime.getURL('assets/exemption_map.json')),
+  ]);
+  const toSet = {};
+  if (!existing.baseline) toSet.baseline = await baselineResp.json();
+  if (!existing.explanations) toSet.explanations = await explanationsResp.json();
+  if (!existing.exemptionMap) toSet.exemptionMap = await exemptionResp.json();
+  if (!existing.settings) toSet.settings = { autoAudit: true };
+  if (Object.keys(toSet).length) await chrome.storage.local.set(toSet);
+}
+
 // --- Tenant-scoped storage ---
 
 function tenantKey(tenant, key) {
@@ -276,6 +292,7 @@ async function handleCheckVersions({ tenant, namespace, managedTenant, lbVersion
 
 async function handleRunAudit({ tenant, namespace, managedTenant, policies, defaultPolicies, lbConfigs, lbVersions, referencedObjects, baselineLbConfigs, baselineLbReferencedObjects, tenantMeta }, forceRefresh) {
   await categoriesReady;
+  await ensureDefaults();
   const tid = compositeId(tenant, managedTenant);
   await trackTenant(tenant, managedTenant);
   if (tenantMeta && Object.keys(tenantMeta).length) {
