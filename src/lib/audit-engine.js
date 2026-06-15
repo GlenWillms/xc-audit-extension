@@ -489,12 +489,16 @@ export function applyBaselineLbOverrides(results, lbConfigs, baselineLbConfigs, 
     lbResult.baselineOverrides = [];
 
     const remainingDiffs = [];
+    const overriddenCheckKeys = new Set();
     for (const diff of lbResult.diffs) {
       if (blbAudit.failedPaths.has(diff.path)) {
-        lbResult.baselineOverrides.push({ ...diff, overrideStatus: 'pass' });
         const key = diff.path.split('.')[1];
+        if (!overriddenCheckKeys.has(key)) {
+          overriddenCheckKeys.add(key);
+          lbResult.baselineOverrides.push({ ...diff, path: `spec.${key}`, overrideStatus: 'pass' });
+        }
         if (!lbResult.passed.find((p) => p.key === key)) {
-          lbResult.passed.push({ key, path: diff.path });
+          lbResult.passed.push({ key, path: `spec.${key}` });
         }
       } else {
         remainingDiffs.push(diff);
