@@ -528,11 +528,15 @@ export function applyBaselineLbOverrides(results, lbConfigs, baselineLbConfigs, 
     }
     lbResult.passed = remainingPassed;
 
+    const finalInspections = [];
     for (const insp of lbResult.inspections) {
       if (insp.pass && blbAudit.failedInspectors.has(insp.inspector)) {
         lbResult.baselineOverrides.push({ ...insp, overrideStatus: 'not_in_baseline' });
+      } else {
+        finalInspections.push(insp);
       }
     }
+    lbResult.inspections = finalInspections;
 
     const hasNotInBaseline = lbResult.baselineOverrides.some((o) => o.overrideStatus === 'not_in_baseline');
     lbResult.pass = lbResult.diffs.length === 0 && lbResult.inspections.every((i) => i.pass) && !hasNotInBaseline;
