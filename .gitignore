@@ -8,6 +8,7 @@ xc-config-objects/
 *.tfstate
 *.tfstate.*
 *.tfplan
+*.out
 *.tfvars
 !*.tfvars.example
 .terraform/
