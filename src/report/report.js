@@ -259,6 +259,8 @@ function bindEvents() {
     for (const cb of $('nsList').querySelectorAll('input[type="checkbox"]')) cb.checked = false;
   });
 
+  $('refreshNs').addEventListener('click', () => loadNamespaces());
+
   $('generate').addEventListener('click', async () => {
     const selected = getSelectedEntries();
     if (selected.length === 0) return;
