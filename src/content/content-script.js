@@ -138,13 +138,7 @@
       return `${apiPrefix}${path}?report_fields&csrf=${csrf}`;
     }
 
-    const tid = managedTenant ? `${tenant}::${managedTenant}` : tenant;
-    const tenantMetaKey = `tenant:${tid}:meta`;
-    const tenantMetaCache = await chrome.storage.local.get(tenantMetaKey);
-    let tenantMeta = tenantMetaCache[tenantMetaKey] || null;
-    if (!tenantMeta) {
-      tenantMeta = await fetchTenantMeta(csrf, managedTenant);
-    }
+    let tenantMeta = await fetchTenantMeta(csrf, managedTenant);
     const domLogo = extractLogo();
     if (domLogo) tenantMeta = { ...tenantMeta, logoDataUrl: domLogo };
     if (managedTenant) tenantMeta = { ...tenantMeta, companyName: managedTenant };
@@ -743,15 +737,66 @@
   }
 
   async function fetchTenantMeta(csrf, managedTenant) {
+    const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
+    const tenantChecks = {
+      sso: { status: 'unknown', detail: 'Unable to verify' },
+      mfa: { status: 'unknown', detail: 'Unable to verify' },
+      passwordPolicy: { status: 'unknown', detail: 'Unable to verify' },
+      globalLogReceiver: { status: 'unknown', detail: 'Unable to verify' },
+    };
+    let companyName = null;
+
     try {
-      const apiPrefix = managedTenant ? `/managed_tenant/${managedTenant}` : '';
       const resp = await fetch(`${apiPrefix}/api/web/namespaces/system/tenant/settings?csrf=${csrf}`);
-      if (!resp.ok) return {};
-      const data = await resp.json();
-      return { companyName: managedTenant || data.company_name || null, logoDataUrl: extractLogo() };
-    } catch {
-      return {};
-    }
+      if (resp.ok) {
+        const data = await resp.json();
+        console.log('[XC Audit] Tenant settings response:', JSON.stringify(data).slice(0, 3000));
+        companyName = managedTenant || data.company_name || null;
+
+        const ssoConfig = data.sso_config || data.login_options?.sso_config;
+        if (ssoConfig && Object.keys(ssoConfig).length > 0) {
+          tenantChecks.sso = { status: 'pass', detail: 'SSO configured' };
+        } else {
+          tenantChecks.sso = { status: 'fail', detail: 'SSO not configured' };
+        }
+
+        const mfaEnforced = data.mfa_required || data.login_options?.mfa_required
+          || data.two_factor_auth?.enforced;
+        if (mfaEnforced) {
+          tenantChecks.mfa = { status: 'pass', detail: 'MFA enforced' };
+        } else {
+          tenantChecks.mfa = { status: 'fail', detail: 'MFA not enforced' };
+        }
+
+        const pwPolicy = data.password_policy || data.login_options?.password_policy;
+        if (pwPolicy && Object.keys(pwPolicy).length > 0) {
+          tenantChecks.passwordPolicy = { status: 'pass', detail: 'Custom password policy configured' };
+        } else {
+          tenantChecks.passwordPolicy = { status: 'fail', detail: 'No custom password policy' };
+        }
+      }
+    } catch { /* leave as unknown */ }
+
+    try {
+      const resp = await fetch(
+        `${apiPrefix}/api/config/namespaces/system/global_log_receivers?report_fields&csrf=${csrf}`
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        console.log('[XC Audit] Global log receivers response:', JSON.stringify(data).slice(0, 3000));
+        const items = data.items || [];
+        if (items.length > 0) {
+          tenantChecks.globalLogReceiver = {
+            status: 'pass',
+            detail: `${items.length} global log receiver${items.length === 1 ? '' : 's'} configured`,
+          };
+        } else {
+          tenantChecks.globalLogReceiver = { status: 'fail', detail: 'No global log receivers configured' };
+        }
+      }
+    } catch { /* leave as unknown */ }
+
+    return { companyName, logoDataUrl: extractLogo(), tenantChecks };
   }
 
   async function fetchPolicies(namespace) {

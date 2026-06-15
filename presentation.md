@@ -62,6 +62,7 @@ Click a badge to expand detailed findings
 | **Bot Defense** | Bot Defense, Client-Side Defense |
 | **API Security** | API Discovery, API Definition, API Testing |
 | **Policy & Data** | Service Policies, Sensitive Data Policy |
+| **Tenant Settings** | SSO, MFA, Password Policy, Global Log Receiver *(report only)* |
 
 ---
 
@@ -210,9 +211,10 @@ A progress bar tracks auditing. If the namespace count is large (>25 or >2x alre
 ## Report Contents
 
 - **Tenant branding** -- logo and company name from the active tenant (parent or managed)
-- **Executive summary** -- compliance %, LB pass/warning counts, per-category breakdown
+- **Executive summary** -- compliance %, LB pass/warning counts, per-category breakdown, tenant settings pass rate
+- **Tenant security settings** -- pass/fail for SSO, MFA, password policy, global log receiver
 - **Per-namespace sections** -- service policy status + categorized LB findings
-- **Recommendations** -- aggregated, deduplicated, sorted by severity then frequency, with remediation steps
+- **Recommendations** -- tenant-level and LB-level items, sorted by severity then frequency, with remediation steps
 
 Self-contained HTML with no external dependencies. Prints cleanly.
 
@@ -419,11 +421,12 @@ A reference LB in the `default` namespace defines the expected posture.
 1. Click **Report** in the extension popup
 2. Select all four demo namespaces
 3. Click **Generate Report**
-4. Walk through the executive summary -- compliance %, per-category breakdown
-5. Show per-namespace sections with detailed findings
-6. Show the recommendations section -- aggregated, deduplicated, sorted by severity
+4. Walk through the executive summary -- compliance %, per-category breakdown, tenant settings pass rate
+5. Show the **Tenant Security Settings** section -- SSO, MFA, password policy, global log receiver
+6. Show per-namespace sections with detailed findings
+7. Show the recommendations section -- tenant-level items first, then LB-level, sorted by severity
 
-**Key message:** One-click visibility across the entire tenant. Share with stakeholders as a self-contained HTML file.
+**Key message:** One-click visibility across the entire tenant -- from platform settings to individual LBs. Share with stakeholders as a self-contained HTML file.
 
 ---
 
@@ -432,7 +435,8 @@ A reference LB in the `default` namespace defines the expected posture.
 | Capability | How |
 |------------|-----|
 | Automated compliance checks | Runs on every LB list page visit |
-| 16+ security checks | TLS, WAF, DDoS, API, Bot, Policy |
+| 20+ security checks | TLS, WAF, DDoS, API, Bot, Policy, Tenant Settings |
+| Tenant security checks | SSO, MFA, password policy, global log receiver |
 | Flexible exemptions | XC labels per LB |
 | Baseline LB override | Reference LB in default namespace |
 | Plan tier awareness | Essentials / Enterprise / Add-on |

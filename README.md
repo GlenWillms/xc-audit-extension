@@ -12,6 +12,7 @@ A browser extension that audits HTTP Load Balancers in F5 Distributed Cloud (XC)
 - **Version-based caching** — only re-audits LBs whose configuration has changed
 - **Register labels in XC** — create known label keys directly from the extension settings
 - **HTML tenant report** — generate a downloadable report covering all audited namespaces with executive summary and recommendations
+- **Tenant security checks** — reports include pass/fail status for tenant-level settings (SSO, MFA, password policy, global log receiver)
 - **Tenant branding** — reports include the tenant's logo and company name
 
 ## Installation
@@ -66,7 +67,20 @@ The default baseline checks for the following security configurations:
 | **Policy & Data** | Sensitive Data Policy | Default policy applied |
 | **Policy & Data** | Trust Client IP Headers | Disabled |
 
-All checks can be toggled on/off in the Settings page.
+All load balancer checks can be toggled on/off in the Settings page.
+
+#### Tenant-Level Checks (Report Only)
+
+The HTML report also evaluates tenant-wide security settings that apply across all namespaces:
+
+| Check | What It Verifies |
+|-------|-----------------|
+| **SSO Enabled** | Single Sign-On is configured for the tenant |
+| **MFA Enforced** | Multi-factor authentication is enforced for all users |
+| **Custom Password Policy** | A custom password policy is configured |
+| **Global Log Receiver** | At least one global log receiver is configured for audit/security log archival |
+
+These checks appear in the report's Tenant Security Settings section, executive summary, and recommendations. They are not shown in the inline overlay badges.
 
 ## Label-Based Exemptions
 
@@ -221,9 +235,11 @@ Generate a self-contained HTML report covering all namespaces you've audited in 
 ### Report Contents
 
 - **Header** — tenant logo and company name (fetched automatically from the XC tenant settings API)
-- **Executive Summary** — total namespaces, LB counts, compliance percentage, and per-category breakdown
+- **Executive Summary** — total namespaces, LB counts, compliance percentage, per-category breakdown, and tenant settings pass rate
+- **OWASP Top 10:2025 Coverage** — mapping of audit checks to OWASP categories with coverage status
+- **Tenant Security Settings** — pass/fail status for SSO, MFA, password policy, and global log receiver
 - **Per-Namespace Sections** — service policy status and per-LB categorized findings with collapsible details
-- **Recommendations** — actionable items aggregated across all LBs, sorted by severity and frequency, with remediation steps
+- **Recommendations** — actionable items for both tenant settings and load balancers, sorted by severity and frequency, with remediation steps
 
 The report is fully self-contained (inline CSS, no external dependencies) and prints cleanly. Only namespaces visited in the current browser session are available — the report uses cached audit data and makes no additional API calls.
 

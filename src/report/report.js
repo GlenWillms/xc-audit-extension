@@ -332,6 +332,7 @@ function bindEvents() {
         tenant: selectedMt || rawTenant,
         companyName: selectedMt || tenantMeta.companyName || null,
         logoDataUrl: tenantMeta.logoDataUrl || null,
+        tenantChecks: tenantMeta.tenantChecks || null,
         namespaces: reportNamespaces,
         checkCategories: catResp.categories || catResp,
         plans: catResp.plans || {},

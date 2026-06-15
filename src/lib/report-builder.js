@@ -241,6 +241,77 @@ function buildCategorySummary(namespaces, checkCategories) {
   return summary;
 }
 
+const TENANT_CHECK_DEFS = [
+  { key: 'sso', label: 'SSO Enabled',
+    description: 'Configure Single Sign-On to centralize authentication and enforce identity provider policies.',
+    nextStep: 'Configure SAML or OIDC SSO under Administration → Login Options.' },
+  { key: 'mfa', label: 'MFA Enforced',
+    description: 'Enforce multi-factor authentication for all tenant users to prevent credential-based attacks.',
+    nextStep: 'Enable mandatory MFA under Administration → Login Options → Enforce Two-Factor Authentication.' },
+  { key: 'passwordPolicy', label: 'Custom Password Policy',
+    description: 'Configure a password policy matching your organization\'s requirements for credential hygiene.',
+    nextStep: 'Configure password policy under Administration → Tenant Settings with minimum length, complexity, and rotation requirements.' },
+  { key: 'globalLogReceiver', label: 'Global Log Receiver',
+    description: 'Configure a global log receiver to capture and archive security events and audit logs.',
+    nextStep: 'Configure a Global Log Receiver under Shared Configuration to forward logs to your SIEM.' },
+];
+
+function buildTenantChecksSection(tenantChecks) {
+  if (!tenantChecks) return '';
+
+  let rows = '';
+  for (const c of TENANT_CHECK_DEFS) {
+    const result = tenantChecks[c.key];
+    const status = result?.status || 'unknown';
+    let statusIcon, statusClass, detail;
+    if (status === 'pass') {
+      statusIcon = '&#x2705;';
+      statusClass = 'tenant-pass';
+      detail = result.detail;
+    } else if (status === 'fail') {
+      statusIcon = '&#x26A0;&#xFE0F;';
+      statusClass = 'tenant-warn';
+      detail = result.detail;
+    } else {
+      statusIcon = '&#x2753;';
+      statusClass = 'tenant-unknown';
+      detail = 'Unable to verify — insufficient permissions or API unavailable';
+    }
+    rows += `<tr class="${statusClass}">
+      <td>${statusIcon}</td>
+      <td><strong>${escapeHtml(c.label)}</strong></td>
+      <td>${escapeHtml(detail)}</td>
+    </tr>`;
+  }
+
+  return `<div class="tenant-section">
+<h3>Tenant Security Settings</h3>
+<p class="tenant-desc">Platform-level security settings that apply across all namespaces and load balancers.</p>
+<table class="tenant-table">
+<thead><tr><th style="width:30px"></th><th>Setting</th><th>Status</th></tr></thead>
+<tbody>${rows}</tbody>
+</table>
+</div>`;
+}
+
+function buildTenantRecommendations(tenantChecks) {
+  if (!tenantChecks) return '';
+  let html = '';
+  for (const c of TENANT_CHECK_DEFS) {
+    if (tenantChecks[c.key]?.status !== 'fail') continue;
+    html += `<div class="rec-item rec-tenant">
+      <div class="rec-header">
+        <span class="rec-label">${escapeHtml(c.label)}</span>
+        <span class="rec-sev rec-sev-tenant">Tenant</span>
+      </div>
+      <div class="rec-impact">Applies to the entire tenant</div>
+      <div class="rec-desc">${escapeHtml(c.description)}</div>
+      <div class="rec-action"><strong>Action:</strong> ${escapeHtml(c.nextStep)}</div>
+    </div>`;
+  }
+  return html;
+}
+
 function owaspBadges(check) {
   if (!check?.owasp?.primary?.length) return '';
   return ' ' + check.owasp.primary.map(c => {
@@ -367,7 +438,7 @@ function buildLbHtml(result, checkCategories) {
   return html;
 }
 
-export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, checkCategories, plans, tierLabels, owaspCategories, explanations, generatedAt, version }) {
+export function buildHtmlReport({ tenant, companyName, logoDataUrl, tenantChecks, namespaces, checkCategories, plans, tierLabels, owaspCategories, explanations, generatedAt, version }) {
   initPlanData(plans, tierLabels);
   _owaspCategories = owaspCategories || {};
   const displayName = companyName || tenant;
@@ -431,9 +502,13 @@ export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, 
     namespaceSections += `</div>`;
   }
 
+  const tenantRecsHtml = buildTenantRecommendations(tenantChecks);
+
   let recsHtml = '';
-  if (recommendations.length === 0) {
+  if (recommendations.length === 0 && !tenantRecsHtml) {
     recsHtml = `<p class="all-clear">All audited load balancers are compliant with the configured baseline. No action items at this time.</p>`;
+  } else if (recommendations.length === 0) {
+    recsHtml = `<p class="all-clear" style="margin-top:12px">All audited load balancers are compliant with the configured baseline.</p>`;
   } else {
     for (const rec of recommendations) {
       const nsCount = rec.namespaces.length;
@@ -453,6 +528,15 @@ export function buildHtmlReport({ tenant, companyName, logoDataUrl, namespaces, 
       if (rec.explanation?.next_step) recsHtml += `<div class="rec-action"><strong>Action:</strong> ${escapeHtml(rec.explanation.next_step)}</div>`;
       recsHtml += `</div>`;
     }
+  }
+
+  const tenantSectionHtml = buildTenantChecksSection(tenantChecks);
+
+  let tenantStatHtml = '';
+  if (tenantChecks) {
+    const tenantPassCount = TENANT_CHECK_DEFS.filter(c => tenantChecks[c.key]?.status === 'pass').length;
+    const tenantStatClass = tenantPassCount === TENANT_CHECK_DEFS.length ? 'stat-pass' : 'stat-warn';
+    tenantStatHtml = `<div class="stat-card ${tenantStatClass}"><div class="stat-value">${tenantPassCount}/${TENANT_CHECK_DEFS.length}</div><div class="stat-label">Tenant Settings</div></div>`;
   }
 
   let catSummaryRows = '';
@@ -564,6 +648,17 @@ td.skip { color: var(--skip-fg); }
 .owasp-badge { display: inline-block; font-size: 9px; font-weight: 600; padding: 1px 4px; border-radius: 2px; background: #e7e8ec; color: #495057; margin-left: 3px; vertical-align: middle; letter-spacing: 0.2px; }
 .owasp-status-cell { text-align: center; }
 
+.tenant-section { background: #f8f9fa; border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin-bottom: 24px; }
+.tenant-section h3 { margin-bottom: 4px; }
+.tenant-desc { font-size: 12px; color: #666; margin-bottom: 10px; }
+.tenant-table { font-size: 13px; }
+.tenant-table td { vertical-align: middle; padding: 8px 10px; }
+.tenant-pass td { color: var(--pass-fg); }
+.tenant-warn td { color: var(--warn-fg); }
+.tenant-unknown td { color: #6c757d; font-style: italic; }
+.rec-tenant { border-left-color: #0d6efd; }
+.rec-sev-tenant { background: var(--rec-bg); color: var(--rec-fg); }
+
 .report-header { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 4px; }
 .tenant-logo { max-height: 48px; max-width: 200px; object-fit: contain; }
 .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 11px; color: #999; text-align: center; }
@@ -574,6 +669,7 @@ td.skip { color: var(--skip-fg); }
   .rec-item { break-inside: avoid; }
   .ns-section { break-before: auto; }
   .owasp-section { break-inside: avoid; }
+  .tenant-section { break-inside: avoid; }
 }
 </style>
 </head>
@@ -595,6 +691,7 @@ ${logoDataUrl ? `<img src="${logoDataUrl}" class="tenant-logo" alt="">` : ''}
   <div class="stat-card stat-pass"><div class="stat-value">${passLbs}</div><div class="stat-label">Passing</div></div>
   <div class="stat-card stat-warn"><div class="stat-value">${warningLbs}</div><div class="stat-label">With Warnings</div></div>
   <div class="stat-card stat-pct"><div class="stat-value">${compliancePct}%</div><div class="stat-label">Compliance</div></div>
+  ${tenantStatHtml}
 </div>
 <table>
 <thead><tr><th>Category</th><th style="text-align:center">Passed</th><th style="text-align:center">Warnings</th><th style="text-align:center">Skipped</th></tr></thead>
@@ -604,11 +701,13 @@ ${logoDataUrl ? `<img src="${logoDataUrl}" class="tenant-logo" alt="">` : ''}
 
 ${owaspHtml}
 
+${tenantSectionHtml}
+
 ${namespaceSections}
 
 <div class="recs-section">
 <h2>Recommendations</h2>
-${recsHtml}
+${tenantRecsHtml}${recsHtml}
 </div>
 
 <div class="footer">Generated by F5 XC Namespace Audit${version ? ` v${escapeHtml(version)}` : ''}</div>
