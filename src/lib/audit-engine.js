@@ -219,7 +219,7 @@ function runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaseline
     const fwObject = referencedObjects.appFirewall?.[fwKey];
     if (fwObject) {
       const fwSpec = fwObject.spec || fwObject;
-      const wafInspectors = ['wafBlocking', 'wafThreatCampaigns', 'wafBotBlocking', 'wafAi'];
+      const wafInspectors = ['wafBlocking', 'wafBotBlocking', 'wafAi'];
       for (const name of wafInspectors) {
         const baseline = inspectorBaselines[name];
         if (baseline && Object.keys(baseline.spec || {}).length > 0) {
@@ -232,6 +232,22 @@ function runInspectionsForLb(lb, namespace, referencedObjects, inspectorBaseline
             diffs: enrichDiffs(diffs, explanations),
           });
         }
+      }
+
+      if (inspectorBaselines.wafThreatCampaigns) {
+        const disabled = fwSpec.detection_settings?.disable_threat_campaigns !== undefined
+          || fwSpec.disable_threat_campaigns !== undefined;
+        const diffs = disabled
+          ? [{ path: 'appfw.spec.detection_settings.disable_threat_campaigns', type: 'VALUE_MISMATCH',
+               expected: 'Threat campaigns enabled', found: 'Threat campaigns disabled' }]
+          : [];
+        inspections.push({
+          inspector: 'wafThreatCampaigns',
+          categoryId: 'waf',
+          refName: fwRef.name,
+          pass: !disabled,
+          diffs: enrichDiffs(diffs, explanations),
+        });
       }
     }
   }

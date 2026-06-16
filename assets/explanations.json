@@ -20,8 +20,12 @@
         "next_step": "Enable blocking mode on the app firewall policy to actively block malicious requests."
     },
     "appfw.spec.detection_settings": {
-        "reason": "Threat campaign detection is not enabled.",
-        "next_step": "Enable threat campaigns in the app firewall detection settings."
+        "reason": "Threat campaign detection has been explicitly disabled.",
+        "next_step": "Remove the 'Disable Threat Campaigns' setting from the app firewall policy to re-enable threat campaign detection."
+    },
+    "appfw.spec.detection_settings.disable_threat_campaigns": {
+        "reason": "Threat campaign detection has been explicitly disabled.",
+        "next_step": "Remove the 'Disable Threat Campaigns' setting from the app firewall policy to re-enable threat campaign detection."
     },
     "appfw.spec.__ONE_OF__bot_protection": {
         "reason": "Malicious bot blocking is not configured.",
