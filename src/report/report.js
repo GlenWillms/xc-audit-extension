@@ -347,6 +347,7 @@ function bindEvents() {
 
       $('preview').srcdoc = lastReportHtml;
       $('previewContainer').style.display = '';
+      $('previewToolbar').style.display = '';
       $('download').disabled = false;
       hideProgress();
     } finally {
@@ -370,5 +371,20 @@ function bindEvents() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  });
+
+  $('expandAll').addEventListener('click', () => {
+    const doc = $('preview').contentDocument;
+    if (doc) doc.querySelectorAll('details').forEach(d => d.open = true);
+  });
+
+  $('collapseAll').addEventListener('click', () => {
+    const doc = $('preview').contentDocument;
+    if (doc) doc.querySelectorAll('details').forEach(d => d.open = false);
+  });
+
+  $('printReport').addEventListener('click', () => {
+    const win = $('preview').contentWindow;
+    if (win) win.print();
   });
 }

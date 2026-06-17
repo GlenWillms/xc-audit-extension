@@ -18,9 +18,11 @@ export function renderReport(container) {
     <div class="report-toolbar">
       <button class="btn-secondary" id="back-to-audit">Back to Audit</button>
       <button class="btn-primary" id="download-report">Download HTML</button>
+      <button class="btn-secondary" id="expand-all">Expand All</button>
+      <button class="btn-secondary" id="collapse-all">Collapse All</button>
       <button class="btn-secondary" id="print-report">Print</button>
     </div>
-    <iframe class="report-frame" id="report-iframe" sandbox="allow-modals allow-scripts"></iframe>
+    <iframe class="report-frame" id="report-iframe" sandbox="allow-same-origin allow-modals"></iframe>
   `;
 
   const iframe = document.getElementById('report-iframe');
@@ -40,5 +42,15 @@ export function renderReport(container) {
 
   document.getElementById('print-report').onclick = () => {
     iframe.contentWindow.print();
+  };
+
+  document.getElementById('expand-all').onclick = () => {
+    const doc = iframe.contentDocument;
+    if (doc) doc.querySelectorAll('details').forEach(d => d.open = true);
+  };
+
+  document.getElementById('collapse-all').onclick = () => {
+    const doc = iframe.contentDocument;
+    if (doc) doc.querySelectorAll('details').forEach(d => d.open = false);
   };
 }

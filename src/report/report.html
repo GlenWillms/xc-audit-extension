@@ -44,7 +44,12 @@
 
     <div id="previewContainer" style="display:none">
       <h2>Preview</h2>
-      <iframe id="preview" sandbox="allow-modals allow-scripts"></iframe>
+      <div class="preview-toolbar" id="previewToolbar" style="display:none">
+        <button class="btn btn-sm btn-secondary" id="expandAll">Expand All</button>
+        <button class="btn btn-sm btn-secondary" id="collapseAll">Collapse All</button>
+        <button class="btn btn-sm btn-secondary" id="printReport">Print</button>
+      </div>
+      <iframe id="preview" sandbox="allow-same-origin allow-modals"></iframe>
     </div>
   </div>
 
