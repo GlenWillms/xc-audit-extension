@@ -669,9 +669,20 @@
 
       const plan = result.plan || 'essentials';
       const addons = result.addons || [];
-      const activeDiffs = result.diffs.filter((d) => isActiveForPlan(d.plan || 'essentials', plan, addons, d.key));
-      const activeInspections = (result.inspections || []).filter((i) => isActiveForPlan(i.plan || 'essentials', plan, addons, i.key));
-      const activePassed = (result.passed || []).filter((p) => isActiveForPlan(p.plan || 'essentials', plan, addons, p.key));
+      const checks = (result.categorized || []).flatMap((c) => c.checks || []);
+      const activeDiffs = result.diffs.filter((d) => {
+        const topKey = d.path.split('.')[1];
+        const check = checks.find((c) => c.key === topKey);
+        return isActiveForPlan(d.plan || check?.plan || 'essentials', plan, addons, check?.key);
+      });
+      const activeInspections = (result.inspections || []).filter((i) => {
+        const check = checks.find((c) => c.inspector === i.inspector);
+        return isActiveForPlan(i.plan || check?.plan || 'essentials', plan, addons, check?.key);
+      });
+      const activePassed = (result.passed || []).filter((p) => {
+        const check = checks.find((c) => c.key === p.key);
+        return isActiveForPlan(p.plan || check?.plan || 'essentials', plan, addons, check?.key);
+      });
       const skipCount = result.skipped?.length || 0;
       const notInBaselineCount = (result.baselineOverrides || []).filter((o) => o.overrideStatus === 'not_in_baseline').length;
       const passCount = activePassed.length;

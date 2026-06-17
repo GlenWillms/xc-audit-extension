@@ -23,13 +23,14 @@ async function readJson(path) {
   }
 }
 
-async function writeJson(path, data) {
+async function writeJson(filePath, data) {
   const prev = writeLock;
-  writeLock = prev.then(async () => {
+  const op = prev.catch(() => {}).then(async () => {
     await ensureDataDir();
-    await writeFile(path, JSON.stringify(data, null, 2));
-  }).catch(() => {});
-  await writeLock;
+    await writeFile(filePath, JSON.stringify(data, null, 2));
+  });
+  writeLock = op.catch(() => {});
+  await op;
 }
 
 // --- Secrets store (encrypted at rest) ---
@@ -125,7 +126,7 @@ export async function updateTenant(id, updates) {
   const idx = tenants.findIndex(t => t.id === id);
   if (idx === -1) return null;
 
-  const configFields = ['name', 'tenant', 'p12Path', 'credentialExpiry', 'consoleSuffix', 'plan', 'addons'];
+  const configFields = ['name', 'tenant', 'p12Path', 'credentialExpiry', 'consoleSuffix', 'plan', 'addons', 'policyOverrides'];
   for (const key of configFields) {
     if (key in updates) tenants[idx][key] = updates[key];
   }
@@ -209,7 +210,7 @@ export async function resolveTenantConfig(parentId, managedId) {
     consoleSuffix: parent.consoleSuffix,
   };
   if (!managedId) {
-    return { ...base, managedTenant: null, plan: parent.plan, addons: parent.addons || [], name: parent.name };
+    return { ...base, managedTenant: null, plan: parent.plan, addons: parent.addons || [], name: parent.name, policyOverrides: parent.policyOverrides || null };
   }
   const managed = (parent.managedTenants || []).find(m => m.id === managedId);
   if (!managed) return null;
@@ -219,5 +220,6 @@ export async function resolveTenantConfig(parentId, managedId) {
     plan: managed.plan || parent.plan,
     addons: managed.addons || parent.addons || [],
     name: managed.name || managed.tenant,
+    policyOverrides: parent.policyOverrides || null,
   };
 }

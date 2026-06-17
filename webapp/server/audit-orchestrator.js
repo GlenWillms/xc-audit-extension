@@ -125,13 +125,16 @@ async function fetchTenantMeta(client, managedTenant) {
   let companyName = null;
 
   const settings = await client.getTenantSettings();
-  if (settings) {
+  if (settings?.__forbidden) {
+    tenantChecks.sso = { status: 'incomplete', detail: 'Insufficient API permissions — manual verification required' };
+    tenantChecks.mfa = { status: 'incomplete', detail: 'Insufficient API permissions — manual verification required' };
+  } else if (settings) {
     companyName = managedTenant || settings.company_name || null;
 
     const ssoConfig = settings.sso_config || settings.login_options?.sso_config;
     if (ssoConfig && Object.keys(ssoConfig).length > 0) {
       tenantChecks.sso = { status: 'pass', detail: 'SSO configured' };
-    } else {
+    } else if ('sso_config' in settings || 'login_options' in settings) {
       tenantChecks.sso = { status: 'fail', detail: 'SSO not configured' };
     }
 
@@ -139,16 +142,42 @@ async function fetchTenantMeta(client, managedTenant) {
       || settings.two_factor_auth?.enforced;
     if (mfaEnforced) {
       tenantChecks.mfa = { status: 'pass', detail: 'MFA enforced' };
-    } else {
+    } else if ('mfa_required' in settings || 'login_options' in settings || 'two_factor_auth' in settings) {
       tenantChecks.mfa = { status: 'fail', detail: 'MFA not enforced' };
     }
   }
 
   const idmSettings = await client.getTenantIdmSettings();
-  if (idmSettings) {
-    if (!managedTenant) {
-      companyName = idmSettings.tenant_details?.display_name || companyName;
+  if (idmSettings?.__forbidden) {
+    if (tenantChecks.sso.status === 'unknown') {
+      tenantChecks.sso = { status: 'incomplete', detail: 'Insufficient API permissions — manual verification required' };
     }
+    if (tenantChecks.mfa.status === 'unknown') {
+      tenantChecks.mfa = { status: 'incomplete', detail: 'Insufficient API permissions — manual verification required' };
+    }
+    tenantChecks.passwordPolicy = { status: 'incomplete', detail: 'Insufficient API permissions — manual verification required' };
+  } else if (idmSettings) {
+    companyName = idmSettings.tenant_details?.display_name || companyName;
+
+    if (tenantChecks.sso.status === 'unknown') {
+      const ssoConfig = idmSettings.sso_config || idmSettings.login_options?.sso_config;
+      if (ssoConfig && Object.keys(ssoConfig).length > 0) {
+        tenantChecks.sso = { status: 'pass', detail: 'SSO configured' };
+      } else {
+        tenantChecks.sso = { status: 'fail', detail: 'SSO not configured' };
+      }
+    }
+
+    if (tenantChecks.mfa.status === 'unknown') {
+      const mfaEnforced = idmSettings.mfa_required || idmSettings.login_options?.mfa_required
+        || idmSettings.two_factor_auth?.enforced;
+      if (mfaEnforced) {
+        tenantChecks.mfa = { status: 'pass', detail: 'MFA enforced' };
+      } else {
+        tenantChecks.mfa = { status: 'fail', detail: 'MFA not enforced' };
+      }
+    }
+
     const pwPolicy = idmSettings.password_policy;
     if (pwPolicy && Object.keys(pwPolicy).length > 0) {
       tenantChecks.passwordPolicy = { status: 'pass', detail: 'Custom password policy configured' };
@@ -158,7 +187,9 @@ async function fetchTenantMeta(client, managedTenant) {
   }
 
   const logData = await client.getGlobalLogReceivers();
-  if (logData) {
+  if (logData?.__forbidden) {
+    tenantChecks.globalLogReceiver = { status: 'incomplete', detail: 'Insufficient API permissions — manual verification required' };
+  } else if (logData) {
     const items = logData.items || [];
     if (items.length > 0) {
       tenantChecks.globalLogReceiver = {
@@ -170,7 +201,8 @@ async function fetchTenantMeta(client, managedTenant) {
     }
   }
 
-  return { companyName, logoDataUrl: null, tenantChecks };
+  const logoDataUrl = await client.getCustomLogo();
+  return { companyName, logoDataUrl, tenantChecks };
 }
 
 export async function auditNamespace(client, namespace, tenantConfig, progress) {
@@ -228,7 +260,11 @@ export async function auditNamespace(client, namespace, tenantConfig, progress) 
   }
 
   const effectiveBaseline = { ...baseline };
-  if (defaultPolicies) {
+  const policyOverrides = tenantConfig.policyOverrides || {};
+  const nsOverride = policyOverrides[namespace];
+  if (nsOverride) {
+    effectiveBaseline.namespace_baseline = nsOverride;
+  } else if (defaultPolicies) {
     effectiveBaseline.namespace_baseline = defaultPolicies;
   }
 
@@ -399,8 +435,8 @@ export async function runFullReport(client, namespaces, tenantConfig, progress) 
   let reportHtml;
   try {
     reportHtml = buildHtmlReport({
-      tenant: tenantConfig.tenant,
-      companyName: tenantMeta.companyName || tenantConfig.name || tenantConfig.tenant,
+      tenant: tenantConfig.managedTenant || tenantConfig.tenant,
+      companyName: tenantConfig.name || tenantMeta.companyName || null,
       logoDataUrl: tenantMeta.logoDataUrl,
       tenantChecks: tenantMeta.tenantChecks,
       namespaces: nsResults,
@@ -411,17 +447,12 @@ export async function runFullReport(client, namespaces, tenantConfig, progress) 
       explanations: tenantConfig.explanations || defaultExplanations,
       generatedAt: new Date().toLocaleString(),
       version: 'webapp',
+      quotaHtml: quotaItems.length ? buildQuotaHtml(quotaItems) : '',
+      quotaCss: quotaItems.length ? QUOTA_CSS : '',
     });
   } catch (err) {
     console.error('[Report] buildHtmlReport failed:', err.stack);
     throw err;
-  }
-
-  // Inject quota section into report before the recommendations section
-  if (quotaItems.length) {
-    const quotaHtml = buildQuotaHtml(quotaItems);
-    reportHtml = reportHtml.replace('</style>', QUOTA_CSS + '</style>');
-    reportHtml = reportHtml.replace('<div class="recs-section">', quotaHtml + '\n<div class="recs-section">');
   }
 
   return {

@@ -60,7 +60,8 @@ function buildRecommendations(namespaces, checkCategories, explanations) {
         seen.add(fKey);
         if (!findings[fKey]) {
           findings[fKey] = {
-            key: fKey, count: 0, namespaces: new Set(), label: check.label,
+            key: fKey, count: 0, namespaces: new Set(), affectedLbs: [],
+            label: check.label,
             description: check.description, required: check.required !== false,
             category: check.category, plan: check.plan,
             owasp: check.owasp || null,
@@ -69,6 +70,7 @@ function buildRecommendations(namespaces, checkCategories, explanations) {
         }
         findings[fKey].count++;
         findings[fKey].namespaces.add(ns.name);
+        findings[fKey].affectedLbs.push(`${ns.name}/${lb.name}`);
       }
 
       for (const insp of lb.result.inspections || []) {
@@ -82,7 +84,8 @@ function buildRecommendations(namespaces, checkCategories, explanations) {
         const explKey = insp.diffs?.[0]?.path;
         if (!findings[fKey]) {
           findings[fKey] = {
-            key: fKey, count: 0, namespaces: new Set(), label: check.label,
+            key: fKey, count: 0, namespaces: new Set(), affectedLbs: [],
+            label: check.label,
             description: check.description, required: check.required !== false,
             category: check.category, plan: check.plan,
             owasp: check.owasp || null,
@@ -91,15 +94,18 @@ function buildRecommendations(namespaces, checkCategories, explanations) {
         }
         findings[fKey].count++;
         findings[fKey].namespaces.add(ns.name);
+        findings[fKey].affectedLbs.push(`${ns.name}/${lb.name}`);
       }
     }
   }
 
   const policyFailNs = namespaces.filter((ns) => ns.policies && !ns.policies.pass);
   if (policyFailNs.length) {
+    const policyAffectedLbs = policyFailNs.flatMap((ns) => ns.loadBalancers.map((lb) => `${ns.name}/${lb.name}`));
     findings['__policy_alignment__'] = {
       key: '__policy_alignment__', count: policyFailNs.length,
       namespaces: new Set(policyFailNs.map((ns) => ns.name)),
+      affectedLbs: policyAffectedLbs,
       label: 'Service Policy Alignment',
       description: 'Active service policies do not match the baseline in one or more namespaces.',
       required: true, category: 'Policy & Data', plan: 'essentials',
@@ -112,7 +118,7 @@ function buildRecommendations(namespaces, checkCategories, explanations) {
       if (a.required !== b.required) return a.required ? -1 : 1;
       return b.count - a.count;
     })
-    .map((f) => ({ ...f, namespaces: [...f.namespaces], totalLbs }));
+    .map((f) => ({ ...f, namespaces: [...f.namespaces], affectedLbs: (f.affectedLbs || []).sort(), totalLbs }));
 }
 
 function buildOwaspSummary(namespaces, checkCategories, owaspCategories) {
@@ -272,6 +278,10 @@ function buildTenantChecksSection(tenantChecks) {
       statusIcon = '&#x26A0;&#xFE0F;';
       statusClass = 'tenant-warn';
       detail = result.detail;
+    } else if (status === 'incomplete') {
+      statusIcon = '&#x1F6C8;';
+      statusClass = 'tenant-unknown';
+      detail = result.detail || 'Incomplete check — manual verification required';
     } else {
       statusIcon = '&#x2753;';
       statusClass = 'tenant-unknown';
@@ -438,9 +448,10 @@ function buildLbHtml(result, checkCategories) {
   return html;
 }
 
-export function buildHtmlReport({ tenant, companyName, logoDataUrl, tenantChecks, namespaces, checkCategories, plans, tierLabels, owaspCategories, explanations, generatedAt, version }) {
+export function buildHtmlReport({ tenant, companyName, logoDataUrl, tenantChecks, namespaces, checkCategories, plans, tierLabels, owaspCategories, explanations, generatedAt, version, quotaHtml, quotaCss }) {
   initPlanData(plans, tierLabels);
   _owaspCategories = owaspCategories || {};
+  const allChecks = checkCategories.flatMap((c) => c.checks);
   const displayName = companyName || tenant;
   const totalLbs = namespaces.reduce((sum, ns) => sum + ns.loadBalancers.length, 0);
   const warningLbs = namespaces.reduce(
@@ -477,9 +488,19 @@ export function buildHtmlReport({ tenant, companyName, logoDataUrl, tenantChecks
       const r = lb.result;
       const plan = r.plan || 'essentials';
       const addons = r.addons || [];
-      const activeDiffs = r.diffs.filter((d) => isActiveForPlan(d.plan || 'essentials', plan, addons, d.key));
-      const activeInspections = (r.inspections || []).filter((i) => isActiveForPlan(i.plan || 'essentials', plan, addons, i.key));
-      const activePassed = (r.passed || []).filter((p) => isActiveForPlan(p.plan || 'essentials', plan, addons, p.key));
+      const activeDiffs = r.diffs.filter((d) => {
+        const topKey = d.path.split('.')[1];
+        const check = allChecks.find((c) => c.key === topKey);
+        return isActiveForPlan(d.plan || check?.plan || 'essentials', plan, addons, check?.key);
+      });
+      const activeInspections = (r.inspections || []).filter((i) => {
+        const check = allChecks.find((c) => c.inspector === i.inspector);
+        return isActiveForPlan(i.plan || check?.plan || 'essentials', plan, addons, check?.key);
+      });
+      const activePassed = (r.passed || []).filter((p) => {
+        const check = allChecks.find((c) => c.key === p.key);
+        return isActiveForPlan(p.plan || check?.plan || 'essentials', plan, addons, check?.key);
+      });
       const skipCount = r.skipped?.length || 0;
       const passCount = activePassed.length;
       const recommendedCount = activeDiffs.filter((d) => d.required === false).length;
@@ -523,7 +544,12 @@ export function buildHtmlReport({ tenant, companyName, logoDataUrl, tenantChecks
         }).join('');
       }
       recsHtml += `</div>`;
-      recsHtml += `<div class="rec-impact">Affects ${rec.count} of ${rec.totalLbs} load balancer${rec.totalLbs === 1 ? '' : 's'} across ${nsCount} namespace${nsCount === 1 ? '' : 's'}</div>`;
+      if (rec.affectedLbs?.length) {
+        recsHtml += `<details class="rec-impact-details"><summary class="rec-impact">Affects ${rec.count} of ${rec.totalLbs} load balancer${rec.totalLbs === 1 ? '' : 's'} across ${nsCount} namespace${nsCount === 1 ? '' : 's'}</summary>`;
+        recsHtml += `<ul class="rec-lb-list">${rec.affectedLbs.map(lb => `<li>${escapeHtml(lb)}</li>`).join('')}</ul></details>`;
+      } else {
+        recsHtml += `<div class="rec-impact">Affects ${rec.count} of ${rec.totalLbs} load balancer${rec.totalLbs === 1 ? '' : 's'} across ${nsCount} namespace${nsCount === 1 ? '' : 's'}</div>`;
+      }
       if (rec.description) recsHtml += `<div class="rec-desc">${escapeHtml(rec.description)}</div>`;
       if (rec.explanation?.next_step) recsHtml += `<div class="rec-action"><strong>Action:</strong> ${escapeHtml(rec.explanation.next_step)}</div>`;
       recsHtml += `</div>`;
@@ -628,7 +654,14 @@ td.skip { color: var(--skip-fg); }
 .rec-sev { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; }
 .rec-required { background: var(--warn-bg); color: var(--warn-fg); }
 .rec-optional { background: var(--rec-bg); color: var(--rec-fg); }
-.rec-impact { font-size: 12px; color: #666; margin-bottom: 4px; }
+.rec-impact { font-size: 12px; color: #666; margin-bottom: 4px; cursor: pointer; }
+.rec-impact-details { margin-bottom: 4px; }
+.rec-impact-details summary { list-style: none; }
+.rec-impact-details summary::-webkit-details-marker { display: none; }
+.rec-impact-details summary::before { content: '\\25B6'; display: inline-block; margin-right: 5px; font-size: 8px; transition: transform 0.15s; }
+.rec-impact-details[open] summary::before { transform: rotate(90deg); }
+.rec-lb-list { list-style: none; padding: 4px 0 0 18px; margin: 0; columns: 2; column-gap: 24px; font-size: 11px; color: #555; font-family: monospace; }
+.rec-lb-list li { padding: 1px 0; break-inside: avoid; }
 .rec-desc { font-size: 13px; color: #444; margin-bottom: 4px; }
 .rec-action { font-size: 13px; color: var(--pass-fg); background: var(--pass-bg); padding: 6px 10px; border-radius: 4px; }
 .all-clear { color: var(--pass-fg); background: var(--pass-bg); padding: 12px; border-radius: 6px; font-size: 14px; }
@@ -662,15 +695,20 @@ td.skip { color: var(--skip-fg); }
 
 .report-header { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 4px; }
 .tenant-logo { max-height: 48px; max-width: 200px; object-fit: contain; }
+.report-controls { display: flex; gap: 8px; margin-bottom: 16px; }
+.report-controls button { font-size: 12px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px; background: #f8f9fa; color: #333; cursor: pointer; }
+.report-controls button:hover { background: #e9ecef; }
 .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 11px; color: #999; text-align: center; }
 
 @media print {
+  .report-controls { display: none; }
   body { padding: 0; max-width: none; }
   .lb-detail[open] summary ~ .lb-body { break-inside: avoid; }
   .rec-item { break-inside: avoid; }
   .ns-section { break-before: auto; }
   .owasp-section { break-inside: avoid; }
   .tenant-section { break-inside: avoid; }
+${quotaCss || ''}
 }
 </style>
 </head>
@@ -682,6 +720,12 @@ ${logoDataUrl ? `<img src="${logoDataUrl}" class="tenant-logo" alt="">` : ''}
 <h1>${escapeHtml(displayName)} &mdash; Security Audit Report</h1>
 <div class="subtitle">Tenant: ${escapeHtml(tenant)} &mdash; Generated: ${escapeHtml(generatedAt)}${version ? ` &mdash; Extension ${escapeHtml(version)}` : ''}</div>
 </div>
+</div>
+
+<div class="report-controls">
+<button id="btn-expand">Expand All</button>
+<button id="btn-collapse">Collapse All</button>
+<button id="btn-print">Print</button>
 </div>
 
 <div class="exec-summary">
@@ -706,6 +750,7 @@ ${tenantSectionHtml}
 
 ${namespaceSections}
 
+${quotaHtml || ''}
 <div class="recs-section">
 <h2>Recommendations</h2>
 ${tenantRecsHtml}${recsHtml}
@@ -713,6 +758,11 @@ ${tenantRecsHtml}${recsHtml}
 
 <div class="footer">Generated by F5 XC Namespace Audit${version ? ` v${escapeHtml(version)}` : ''}</div>
 
+<script>
+document.getElementById('btn-expand').addEventListener('click', function() { document.querySelectorAll('details').forEach(function(d) { d.open = true; }); });
+document.getElementById('btn-collapse').addEventListener('click', function() { document.querySelectorAll('details').forEach(function(d) { d.open = false; }); });
+document.getElementById('btn-print').addEventListener('click', function() { window.print(); });
+</script>
 </body>
 </html>`;
 }

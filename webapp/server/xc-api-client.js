@@ -12,8 +12,14 @@ function getAgent(p12Path, p12Password) {
   return agent;
 }
 
+const TENANT_NAME_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
+const CONSOLE_SUFFIX_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z]{2,}$/;
+
 export class XcApiClient {
   constructor(tenantName, { managedTenant = null, consoleSuffix = 'console.ves.volterra.io', p12Path = null, p12Password = '', apiToken = null } = {}) {
+    if (!TENANT_NAME_RE.test(tenantName)) throw new Error('Invalid tenant name');
+    if (!CONSOLE_SUFFIX_RE.test(consoleSuffix) || consoleSuffix.includes('..')) throw new Error('Invalid console suffix');
+    this.tenantName = tenantName;
     this.baseUrl = `https://${tenantName}.${consoleSuffix}`;
     this.managedTenant = managedTenant;
     this.p12Path = p12Path;
@@ -37,6 +43,7 @@ export class XcApiClient {
       return this._fetchWithCert(url);
     } else if (this.apiToken) {
       options.headers['Authorization'] = `APIToken ${this.apiToken}`;
+      options.headers['x-volterra-apigw-tenant'] = this.tenantName;
     }
 
     const resp = await fetch(url, options);
@@ -46,7 +53,7 @@ export class XcApiClient {
   _fetchWithCert(url) {
     const agent = getAgent(this.p12Path, this.p12Password);
     return new Promise((resolve, reject) => {
-      const req = https.get(url, { agent }, (res) => {
+      const req = https.get(url, { agent, headers: { 'x-volterra-apigw-tenant': this.tenantName } }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
         res.on('end', () => {
@@ -105,7 +112,6 @@ export class XcApiClient {
     try {
       return await this._fetch(path);
     } catch (err) {
-      // For managed tenants, retry without the prefix for shared/system resources
       if (this.managedTenant) {
         try {
           return await this._fetchDirect(path);
@@ -114,6 +120,9 @@ export class XcApiClient {
         }
       }
       console.log(`[XC API] Soft failure: ${err.message}`);
+      if (err.message.includes('(403)') || err.message.includes('(401)')) {
+        return { __forbidden: true };
+      }
       return null;
     }
   }
@@ -124,7 +133,7 @@ export class XcApiClient {
       return this._fetchWithCert(url);
     }
     const resp = await fetch(url, {
-      headers: this.apiToken ? { 'Authorization': `APIToken ${this.apiToken}` } : {},
+      headers: this.apiToken ? { 'Authorization': `APIToken ${this.apiToken}`, 'x-volterra-apigw-tenant': this.tenantName } : {},
       redirect: 'manual',
     });
     return this._handleResponse(resp, url, path);
@@ -157,6 +166,61 @@ export class XcApiClient {
 
   async getServicePolicy(namespace, name) {
     return this._fetchSafe(`/api/config/namespaces/${encodeURIComponent(namespace)}/service_policys/${encodeURIComponent(name)}?report_fields`);
+  }
+
+  async getCustomLogo() {
+    const path = '/api/web/namespaces/system/tenant/settings/tenant/image';
+    try {
+      const url = `${this.baseUrl}${this._prefix()}${path}`;
+      if (this.p12Path) {
+        const agent = getAgent(this.p12Path, this.p12Password);
+        return await new Promise((resolve) => {
+          const chunks = [];
+          const req = https.get(url, { agent }, (res) => {
+            if (res.statusCode !== 200) { resolve(null); return; }
+            const ct = (res.headers['content-type'] || '').split(';')[0].trim();
+            res.on('data', chunk => chunks.push(chunk));
+            res.on('end', () => {
+              const buf = Buffer.concat(chunks);
+              if (ct.startsWith('image/')) {
+                resolve(`data:${ct};base64,${buf.toString('base64')}`);
+              } else {
+                resolve(this._extractLogoFromJson(buf.toString('utf8')));
+              }
+            });
+          });
+          req.on('error', () => resolve(null));
+        });
+      }
+      const options = { redirect: 'manual', headers: {} };
+      if (this.apiToken) {
+        options.headers['Authorization'] = `APIToken ${this.apiToken}`;
+        options.headers['x-volterra-apigw-tenant'] = this.tenantName;
+      }
+      const resp = await fetch(url, options);
+      if (!resp.ok) return null;
+      const ct = (resp.headers.get('content-type') || '').split(';')[0].trim();
+      if (ct.startsWith('image/')) {
+        const buf = Buffer.from(await resp.arrayBuffer());
+        return `data:${ct};base64,${buf.toString('base64')}`;
+      }
+      const body = await resp.text();
+      return this._extractLogoFromJson(body);
+    } catch {
+      return null;
+    }
+  }
+
+  _extractLogoFromJson(body) {
+    try {
+      const data = JSON.parse(body);
+      const raw = data.data || data.image || data.image_data || data.logo || data.content;
+      if (raw && typeof raw === 'string') {
+        if (raw.startsWith('data:image')) return raw;
+        if (raw.length > 100) return `data:image/png;base64,${raw}`;
+      }
+    } catch { /* not JSON */ }
+    return null;
   }
 
   async getTenantSettings() {

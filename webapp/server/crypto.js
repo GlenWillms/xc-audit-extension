@@ -26,12 +26,20 @@ export function encrypt(plaintext) {
 export function decrypt(value) {
   if (!derivedKey) throw new Error('Crypto not initialized');
   if (!value || !value.startsWith('enc:')) return value;
-  const [, ivHex, tagHex, encrypted] = value.split(':');
-  const decipher = createDecipheriv(ALGO, derivedKey, Buffer.from(ivHex, 'hex'));
-  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
+  const parts = value.split(':');
+  if (parts.length !== 4) {
+    throw new Error('Invalid encrypted value format: expected enc:iv:tag:data');
+  }
+  const [, ivHex, tagHex, encrypted] = parts;
+  try {
+    const decipher = createDecipheriv(ALGO, derivedKey, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (err) {
+    throw new Error(`Decryption failed: ${err.message}`);
+  }
 }
 
 export function isEncrypted(value) {

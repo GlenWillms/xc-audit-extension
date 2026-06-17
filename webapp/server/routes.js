@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import path from 'node:path';
 import {
   listTenants, addTenant, updateTenant, deleteTenant,
   addManagedTenant, updateManagedTenant, deleteManagedTenant,
@@ -11,6 +12,32 @@ const router = Router();
 
 function wrap(fn) {
   return (req, res, next) => fn(req, res, next).catch(next);
+}
+
+const TENANT_NAME_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
+const CONSOLE_SUFFIX_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z]{2,}$/;
+
+function validateTenantInputs(body) {
+  if (body.tenant && !TENANT_NAME_RE.test(body.tenant)) {
+    return 'Invalid tenant name: only alphanumeric characters and hyphens allowed';
+  }
+  if (body.consoleSuffix) {
+    if (!CONSOLE_SUFFIX_RE.test(body.consoleSuffix) || body.consoleSuffix.includes('..')) {
+      return 'Invalid consoleSuffix format';
+    }
+  }
+  if (body.p12Path) {
+    if (!path.isAbsolute(body.p12Path)) {
+      return 'p12Path must be an absolute path';
+    }
+    if (body.p12Path.includes('..')) {
+      return 'p12Path must not contain path traversal (..)';
+    }
+    if (!/\.(p12|pfx)$/i.test(body.p12Path)) {
+      return 'p12Path must end with .p12 or .pfx';
+    }
+  }
+  return null;
 }
 
 function makeClient(config) {
@@ -31,6 +58,8 @@ router.get('/tenants', wrap(async (req, res) => {
 
 router.post('/tenants', wrap(async (req, res) => {
   const { name, tenant, p12Path, p12Password, apiToken, credentialExpiry, consoleSuffix, plan, addons } = req.body;
+  const inputErr = validateTenantInputs(req.body);
+  if (inputErr) return res.status(400).json({ error: inputErr });
   if (!tenant) {
     return res.status(400).json({ error: 'tenant is required' });
   }
@@ -42,6 +71,8 @@ router.post('/tenants', wrap(async (req, res) => {
 }));
 
 router.put('/tenants/:id', wrap(async (req, res) => {
+  const inputErr = validateTenantInputs(req.body);
+  if (inputErr) return res.status(400).json({ error: inputErr });
   const result = await updateTenant(req.params.id, req.body);
   if (!result) return res.status(404).json({ error: 'Tenant not found' });
   res.json(result);

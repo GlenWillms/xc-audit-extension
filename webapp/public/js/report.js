@@ -20,7 +20,7 @@ export function renderReport(container) {
       <button class="btn-primary" id="download-report">Download HTML</button>
       <button class="btn-secondary" id="print-report">Print</button>
     </div>
-    <iframe class="report-frame" id="report-iframe" sandbox="allow-same-origin"></iframe>
+    <iframe class="report-frame" id="report-iframe" sandbox="allow-modals allow-scripts"></iframe>
   `;
 
   const iframe = document.getElementById('report-iframe');

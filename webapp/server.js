@@ -33,6 +33,22 @@ const app = express();
 
 app.use(express.json());
 app.use(express.static(join(__dirname, 'public')));
+
+app.use('/api', (req, res, next) => {
+  const origin = req.get('Origin');
+  if (origin) {
+    const allowed = [`http://127.0.0.1:${PORT}`, `http://localhost:${PORT}`];
+    if (!allowed.includes(origin)) {
+      return res.status(403).json({ error: 'Forbidden: cross-origin request' });
+    }
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 app.use('/api', routes);
 
 app.use((err, req, res, _next) => {

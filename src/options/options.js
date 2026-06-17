@@ -1,5 +1,9 @@
 const $ = (id) => document.getElementById(id);
 
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 const XC_TAB_PATTERN = 'https://*.console.ves.volterra.io/*';
 
 let selectedTenant = null;
@@ -27,11 +31,17 @@ async function getTenantConfig(tenant) {
     const data = await chrome.storage.local.get(keys);
     return Object.fromEntries(keys.map((k) => [k, data[k]]));
   }
-  const allKeys = [...keys.map((k) => tenantKey(tenant, k)), ...keys];
+  const parts = tenant.split('::');
+  const parent = parts.length > 1 ? parts[0] : null;
+  const allKeys = [...keys.map((k) => tenantKey(tenant, k))];
+  if (parent) allKeys.push(...keys.map((k) => tenantKey(parent, k)));
+  allKeys.push(...keys);
   const data = await chrome.storage.local.get(allKeys);
   const result = {};
   for (const k of keys) {
-    result[k] = data[tenantKey(tenant, k)] ?? data[k];
+    result[k] = data[tenantKey(tenant, k)]
+      ?? (parent ? data[tenantKey(parent, k)] : undefined)
+      ?? data[k];
   }
   return result;
 }
@@ -256,9 +266,9 @@ function renderExemptionMap(map) {
     const row = document.createElement('div');
     row.className = 'exemption-row';
     row.innerHTML =
-      `<input type="text" class="ex-code" value="${code}" placeholder="code">` +
-      `<input type="text" class="ex-label" value="${entry.label || ''}" placeholder="Label">` +
-      `<input type="text" class="ex-keys" value="${(entry.keys || []).join(', ')}" placeholder="Baseline keys (comma-separated)">` +
+      `<input type="text" class="ex-code" value="${escapeHtml(code)}" placeholder="code">` +
+      `<input type="text" class="ex-label" value="${escapeHtml(entry.label || '')}" placeholder="Label">` +
+      `<input type="text" class="ex-keys" value="${escapeHtml((entry.keys || []).join(', '))}" placeholder="Baseline keys (comma-separated)">` +
       `<button class="btn-danger btn-sm ex-remove">x</button>`;
     row.querySelector('.ex-remove').addEventListener('click', () => row.remove());
     container.appendChild(row);
