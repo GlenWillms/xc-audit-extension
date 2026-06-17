@@ -105,9 +105,29 @@ export class XcApiClient {
     try {
       return await this._fetch(path);
     } catch (err) {
+      // For managed tenants, retry without the prefix for shared/system resources
+      if (this.managedTenant) {
+        try {
+          return await this._fetchDirect(path);
+        } catch {
+          // fall through
+        }
+      }
       console.log(`[XC API] Soft failure: ${err.message}`);
       return null;
     }
+  }
+
+  async _fetchDirect(path) {
+    const url = `${this.baseUrl}${path}`;
+    if (this.p12Path) {
+      return this._fetchWithCert(url);
+    }
+    const resp = await fetch(url, {
+      headers: this.apiToken ? { 'Authorization': `APIToken ${this.apiToken}` } : {},
+      redirect: 'manual',
+    });
+    return this._handleResponse(resp, url, path);
   }
 
   async listNamespaces() {
@@ -149,5 +169,20 @@ export class XcApiClient {
 
   async getGlobalLogReceivers() {
     return this._fetchSafe('/api/config/namespaces/system/global_log_receivers?report_fields');
+  }
+
+  async getQuotaUsage() {
+    return this._fetchSafe('/api/web/namespaces/system/quota/usage');
+  }
+
+  async listManagedTenants() {
+    const data = await this._fetch('/api/web/namespaces/system/managed_tenants_by_user?page_limit=100');
+    return (data.access_config || [])
+      .filter(t => t.tenant_status === 'TENANT_STATUS_ACTIVE')
+      .map(t => ({
+        name: t.link?.name || t.name,
+        fullName: t.name,
+        groups: (t.groups || []).flatMap(g => g.managed_tenant_groups || []),
+      }));
   }
 }

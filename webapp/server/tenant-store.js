@@ -7,8 +7,7 @@ import { encrypt, decrypt } from './crypto.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '..', 'data');
 const TENANTS_FILE = join(DATA_DIR, 'tenants.json');
-
-const SECRET_FIELDS = ['p12Password', 'apiToken'];
+const SECRETS_FILE = join(DATA_DIR, 'secrets.json');
 
 let writeLock = Promise.resolve();
 
@@ -16,49 +15,82 @@ async function ensureDataDir() {
   await mkdir(DATA_DIR, { recursive: true });
 }
 
-function decryptTenant(t) {
-  const copy = { ...t };
-  for (const key of SECRET_FIELDS) {
-    if (copy[key]) copy[key] = decrypt(copy[key]);
-  }
-  return copy;
-}
-
-function encryptTenant(t) {
-  const copy = { ...t };
-  for (const key of SECRET_FIELDS) {
-    if (copy[key]) copy[key] = encrypt(copy[key]);
-  }
-  return copy;
-}
-
-async function readTenants() {
+async function readJson(path) {
   try {
-    const raw = await readFile(TENANTS_FILE, 'utf-8');
-    return JSON.parse(raw).map(decryptTenant);
+    return JSON.parse(await readFile(path, 'utf-8'));
   } catch {
-    return [];
+    return null;
   }
 }
 
-async function writeTenants(tenants) {
-  const encrypted = tenants.map(encryptTenant);
+async function writeJson(path, data) {
   const prev = writeLock;
   writeLock = prev.then(async () => {
     await ensureDataDir();
-    await writeFile(TENANTS_FILE, JSON.stringify(encrypted, null, 2));
+    await writeFile(path, JSON.stringify(data, null, 2));
   }).catch(() => {});
   await writeLock;
 }
 
-function sanitize({ p12Password, apiToken, ...rest }) {
-  return { ...rest, hasCredential: !!(rest.p12Path || apiToken) };
+// --- Secrets store (encrypted at rest) ---
+
+async function readSecrets() {
+  const raw = await readJson(SECRETS_FILE);
+  if (!raw) return {};
+  const decrypted = {};
+  for (const [id, entry] of Object.entries(raw)) {
+    decrypted[id] = {};
+    for (const [k, v] of Object.entries(entry)) {
+      decrypted[id][k] = decrypt(v);
+    }
+  }
+  return decrypted;
+}
+
+async function writeSecrets(secrets) {
+  const encrypted = {};
+  for (const [id, entry] of Object.entries(secrets)) {
+    encrypted[id] = {};
+    for (const [k, v] of Object.entries(entry)) {
+      encrypted[id][k] = v ? encrypt(v) : '';
+    }
+  }
+  await writeJson(SECRETS_FILE, encrypted);
+}
+
+async function getSecrets(id) {
+  const all = await readSecrets();
+  return all[id] || {};
+}
+
+async function setSecrets(id, values) {
+  const all = await readSecrets();
+  all[id] = { ...(all[id] || {}), ...values };
+  await writeSecrets(all);
+}
+
+async function deleteSecrets(id) {
+  const all = await readSecrets();
+  delete all[id];
+  await writeSecrets(all);
+}
+
+// --- Tenants store (plain config) ---
+
+async function readTenants() {
+  return (await readJson(TENANTS_FILE)) || [];
+}
+
+async function writeTenantsFile(tenants) {
+  await writeJson(TENANTS_FILE, tenants);
 }
 
 export async function listTenants() {
   const tenants = await readTenants();
+  const secrets = await readSecrets();
   return tenants.map(t => ({
-    ...sanitize(t),
+    ...t,
+    hasCredential: !!(t.p12Path || secrets[t.id]?.apiToken),
     managedTenants: (t.managedTenants || []).map(m => ({ ...m })),
   }));
 }
@@ -68,36 +100,46 @@ export async function getTenant(id) {
   return tenants.find(t => t.id === id) || null;
 }
 
-export async function addTenant({ name, tenant, p12Path, p12Password, apiToken, consoleSuffix, plan, addons }) {
+export async function addTenant({ name, tenant, p12Path, p12Password, apiToken, credentialExpiry, consoleSuffix, plan, addons }) {
   const tenants = await readTenants();
+  const id = randomUUID();
   const entry = {
-    id: randomUUID(),
+    id,
     name: name || tenant,
     tenant,
     p12Path: p12Path || null,
-    p12Password: p12Password || '',
-    apiToken: apiToken || null,
+    credentialExpiry: credentialExpiry || null,
     consoleSuffix: consoleSuffix || 'console.ves.volterra.io',
     plan: plan || 'essentials',
     addons: addons || [],
     managedTenants: [],
   };
   tenants.push(entry);
-  await writeTenants(tenants);
-  return { ...sanitize(entry), managedTenants: [] };
+  await writeTenantsFile(tenants);
+  await setSecrets(id, { p12Password: p12Password || '', apiToken: apiToken || '' });
+  return { ...entry, hasCredential: !!(p12Path || apiToken), managedTenants: [] };
 }
 
 export async function updateTenant(id, updates) {
   const tenants = await readTenants();
   const idx = tenants.findIndex(t => t.id === id);
   if (idx === -1) return null;
-  const allowed = ['name', 'tenant', 'p12Path', 'p12Password', 'apiToken', 'consoleSuffix', 'plan', 'addons'];
-  for (const key of allowed) {
+
+  const configFields = ['name', 'tenant', 'p12Path', 'credentialExpiry', 'consoleSuffix', 'plan', 'addons'];
+  for (const key of configFields) {
     if (key in updates) tenants[idx][key] = updates[key];
   }
-  await writeTenants(tenants);
+  await writeTenantsFile(tenants);
+
+  const secretUpdates = {};
+  if ('p12Password' in updates) secretUpdates.p12Password = updates.p12Password || '';
+  if ('apiToken' in updates) secretUpdates.apiToken = updates.apiToken || '';
+  if (Object.keys(secretUpdates).length) await setSecrets(id, secretUpdates);
+
+  const secrets = await getSecrets(id);
   return {
-    ...sanitize(tenants[idx]),
+    ...tenants[idx],
+    hasCredential: !!(tenants[idx].p12Path || secrets.apiToken),
     managedTenants: tenants[idx].managedTenants || [],
   };
 }
@@ -106,7 +148,8 @@ export async function deleteTenant(id) {
   const tenants = await readTenants();
   const filtered = tenants.filter(t => t.id !== id);
   if (filtered.length === tenants.length) return false;
-  await writeTenants(filtered);
+  await writeTenantsFile(filtered);
+  await deleteSecrets(id);
   return true;
 }
 
@@ -125,7 +168,7 @@ export async function addManagedTenant(parentId, { name, tenant, plan, addons })
     addons: addons || [...(parent.addons || [])],
   };
   parent.managedTenants.push(entry);
-  await writeTenants(tenants);
+  await writeTenantsFile(tenants);
   return entry;
 }
 
@@ -139,7 +182,7 @@ export async function updateManagedTenant(parentId, managedId, updates) {
   for (const key of allowed) {
     if (key in updates) managed[key] = updates[key];
   }
-  await writeTenants(tenants);
+  await writeTenantsFile(tenants);
   return managed;
 }
 
@@ -150,34 +193,28 @@ export async function deleteManagedTenant(parentId, managedId) {
   const before = parent.managedTenants.length;
   parent.managedTenants = parent.managedTenants.filter(m => m.id !== managedId);
   if (parent.managedTenants.length === before) return false;
-  await writeTenants(tenants);
+  await writeTenantsFile(tenants);
   return true;
 }
 
 export async function resolveTenantConfig(parentId, managedId) {
   const parent = await getTenant(parentId);
   if (!parent) return null;
+  const secrets = await getSecrets(parentId);
+  const base = {
+    tenant: parent.tenant,
+    p12Path: parent.p12Path,
+    p12Password: secrets.p12Password || '',
+    apiToken: secrets.apiToken || '',
+    consoleSuffix: parent.consoleSuffix,
+  };
   if (!managedId) {
-    return {
-      tenant: parent.tenant,
-      p12Path: parent.p12Path,
-      p12Password: parent.p12Password,
-      apiToken: parent.apiToken,
-      consoleSuffix: parent.consoleSuffix,
-      managedTenant: null,
-      plan: parent.plan,
-      addons: parent.addons || [],
-      name: parent.name,
-    };
+    return { ...base, managedTenant: null, plan: parent.plan, addons: parent.addons || [], name: parent.name };
   }
   const managed = (parent.managedTenants || []).find(m => m.id === managedId);
   if (!managed) return null;
   return {
-    tenant: parent.tenant,
-    p12Path: parent.p12Path,
-    p12Password: parent.p12Password,
-    apiToken: parent.apiToken,
-    consoleSuffix: parent.consoleSuffix,
+    ...base,
     managedTenant: managed.tenant,
     plan: managed.plan || parent.plan,
     addons: managed.addons || parent.addons || [],

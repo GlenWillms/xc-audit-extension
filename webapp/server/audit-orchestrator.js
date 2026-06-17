@@ -282,8 +282,98 @@ export async function auditNamespace(client, namespace, tenantConfig, progress) 
   };
 }
 
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function processQuotas(quotaData) {
+  if (!quotaData) return [];
+  const items = [];
+
+  function collect(section, source) {
+    if (!section) return;
+    for (const [name, entry] of Object.entries(section)) {
+      const max = entry.limit?.maximum;
+      const current = entry.usage?.current;
+      if (max == null || max <= 0 || current == null || current < 0) continue;
+      const pct = Math.round((current / max) * 100);
+      if (pct < 75) continue;
+      const displayName = entry.display_name || name;
+      items.push({
+        name: displayName || name,
+        current,
+        maximum: max,
+        pct,
+        level: pct >= 90 ? 'warning' : 'notice',
+        source,
+        description: (entry.description || '').trim().split('\n')[0].trim(),
+      });
+    }
+  }
+
+  collect(quotaData.quota_usage, 'quota');
+  collect(quotaData.float_quota_usage, 'resource');
+  // objects and resources often duplicate quota_usage/float_quota_usage, skip to avoid dupes
+
+  items.sort((a, b) => b.pct - a.pct);
+  return items;
+}
+
+function buildQuotaHtml(quotaItems) {
+  if (!quotaItems.length) return '';
+
+  const warnings = quotaItems.filter(q => q.level === 'warning');
+  const notices = quotaItems.filter(q => q.level === 'notice');
+
+  let rows = '';
+  for (const q of quotaItems) {
+    const barColor = q.level === 'warning' ? '#dc3545' : '#fd7e14';
+    const levelClass = q.level === 'warning' ? 'quota-warning' : 'quota-notice';
+    rows += `<tr class="${levelClass}">
+      <td>${escHtml(q.name)}</td>
+      <td class="quota-num">${q.current}</td>
+      <td class="quota-num">${q.maximum}</td>
+      <td class="quota-num"><strong>${q.pct}%</strong></td>
+      <td class="quota-bar-cell">
+        <div class="quota-bar"><div class="quota-fill" style="width:${Math.min(q.pct, 100)}%;background:${barColor}"></div></div>
+      </td>
+    </tr>`;
+  }
+
+  return `<div class="quota-section">
+<h3>Quota Usage</h3>
+<p class="quota-desc">${warnings.length ? `<strong>${warnings.length}</strong> item${warnings.length !== 1 ? 's' : ''} at 90%+ (warning)` : ''}${warnings.length && notices.length ? ', ' : ''}${notices.length ? `<strong>${notices.length}</strong> item${notices.length !== 1 ? 's' : ''} at 75%+ (notice)` : ''}</p>
+<table class="quota-table">
+<thead><tr><th>Resource</th><th style="width:60px;text-align:right">Used</th><th style="width:60px;text-align:right">Limit</th><th style="width:50px;text-align:right">%</th><th style="width:120px"></th></tr></thead>
+<tbody>${rows}</tbody>
+</table>
+</div>`;
+}
+
+const QUOTA_CSS = `
+.quota-section { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 16px; margin-bottom: 24px; }
+.quota-section h3 { margin-bottom: 4px; font-size: 15px; }
+.quota-desc { font-size: 12px; color: #666; margin-bottom: 10px; }
+.quota-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.quota-table th, .quota-table td { padding: 6px 10px; border-bottom: 1px solid #dee2e6; text-align: left; }
+.quota-table th { font-weight: 600; background: #f8f9fa; font-size: 12px; }
+.quota-num { text-align: right !important; font-variant-numeric: tabular-nums; }
+.quota-bar-cell { padding-right: 12px !important; }
+.quota-bar { height: 8px; background: #e9ecef; border-radius: 4px; overflow: hidden; }
+.quota-fill { height: 100%; border-radius: 4px; }
+.quota-warning td { color: #721c24; }
+.quota-notice td { color: #664d03; }
+`;
+
 export async function runFullReport(client, namespaces, tenantConfig, progress) {
   const tenantMeta = await fetchTenantMeta(client, tenantConfig.managedTenant);
+
+  progress?.('Fetching quota usage...');
+  const quotaData = await client.getQuotaUsage();
+  const quotaItems = processQuotas(quotaData);
+  if (quotaItems.length) {
+    console.log(`[Quota] ${quotaItems.length} items at 75%+ usage`);
+  }
 
   const nsResults = [];
   for (let i = 0; i < namespaces.length; i++) {
@@ -327,6 +417,13 @@ export async function runFullReport(client, namespaces, tenantConfig, progress) 
     throw err;
   }
 
+  // Inject quota section into report before the recommendations section
+  if (quotaItems.length) {
+    const quotaHtml = buildQuotaHtml(quotaItems);
+    reportHtml = reportHtml.replace('</style>', QUOTA_CSS + '</style>');
+    reportHtml = reportHtml.replace('<div class="recs-section">', quotaHtml + '\n<div class="recs-section">');
+  }
+
   return {
     summary: {
       totalLbs,
@@ -334,7 +431,10 @@ export async function runFullReport(client, namespaces, tenantConfig, progress) 
       warnings: warningLbs,
       compliance: totalLbs > 0 ? Math.round((passLbs / totalLbs) * 100) : 100,
       namespaceCount: nsResults.length,
+      quotaWarnings: quotaItems.filter(q => q.level === 'warning').length,
+      quotaNotices: quotaItems.filter(q => q.level === 'notice').length,
     },
+    quotaItems,
     namespaces: nsResults,
     reportHtml,
   };

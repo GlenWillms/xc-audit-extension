@@ -102,6 +102,11 @@ function renderSummary(container, result) {
         <div class="stat-value">${s.compliance}%</div>
         <div class="stat-label">Compliance</div>
       </div>
+      ${(s.quotaWarnings || s.quotaNotices) ? `
+      <div class="stat-card ${s.quotaWarnings ? 'stat-warn' : 'stat-quota-notice'}">
+        <div class="stat-value">${(s.quotaWarnings || 0) + (s.quotaNotices || 0)}</div>
+        <div class="stat-label">Quota Alerts</div>
+      </div>` : ''}
     </div>
     <div class="form-actions">
       <button class="btn-primary" id="view-report-btn">View Full Report</button>

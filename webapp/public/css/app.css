@@ -254,6 +254,12 @@ select:focus {
   color: #c92a2a;
 }
 
+/* Credential expiry */
+.expiry-ok { background: #d3f9d8; color: #2b8a3e; }
+.expiry-warning { background: #fff3bf; color: #946200; }
+.expiry-soon { background: #ffe3e3; color: #c92a2a; }
+.expiry-expired { background: #c92a2a; color: #fff; }
+
 /* Auth toggle */
 .auth-toggle {
   display: flex;
@@ -397,6 +403,7 @@ select:focus {
 .stat-pass .stat-value { color: #2b8a3e; }
 .stat-warn .stat-value { color: #c92a2a; }
 .stat-pct .stat-value { color: #0d6efd; }
+.stat-quota-notice .stat-value { color: #fd7e14; }
 
 /* Namespace selection */
 .ns-list {

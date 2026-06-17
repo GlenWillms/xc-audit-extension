@@ -551,7 +551,9 @@
             const inspLabel = inspCheck?.label || insp.refName;
             const inspTooltip = inspCheck?.description || '';
             const active = isActiveForPlan(insp.plan || inspCheck?.plan || 'essentials', currentPlan, planCtx.addons, inspCheck?.key);
-            if (!active) {
+            if (!active && insp.pass) {
+              html += `<span class="xc-audit-unlicensed-tag" data-tooltip="${escapeHtml(inspTooltip)}">${escapeHtml(inspLabel)} — Unlicensed</span>`;
+            } else if (!active) {
               const tag = planTagLabel(insp.plan || inspCheck?.plan);
               html += `<span class="xc-audit-unavailable-tag" data-tooltip="${escapeHtml(inspTooltip)}">${escapeHtml(inspLabel)} — ${tag}</span>`;
             } else if (insp.pass) {
@@ -580,8 +582,7 @@
             const tooltip = check?.description || '';
             const active = isActiveForPlan(o.plan || check?.plan || 'essentials', currentPlan, planCtx.addons, check?.key);
             if (!active) {
-              const tag = planTagLabel(o.plan || check?.plan);
-              html += `<span class="xc-audit-unavailable-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — ${tag}</span>`;
+              html += `<span class="xc-audit-unlicensed-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — Unlicensed</span>`;
             } else if (o.overrideStatus === 'not_in_baseline') {
               html += `<span class="xc-audit-info-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)} — not in baseline</span>`;
             } else {
@@ -606,8 +607,7 @@
             const tooltip = check?.description || '';
             const active = isActiveForPlan(p.plan || check?.plan || 'essentials', currentPlan, planCtx.addons, check?.key);
             if (!active) {
-              const tag = planTagLabel(p.plan || check?.plan);
-              html += `<span class="xc-audit-unavailable-tag" data-tooltip="${escapeHtml(tooltip)}">${escapeHtml(label)} — ${tag}</span>`;
+              html += `<span class="xc-audit-unlicensed-tag" data-tooltip="${escapeHtml(tooltip)}">${escapeHtml(label)} — Unlicensed</span>`;
             } else {
               html += `<span class="xc-audit-passed-tag"${tooltip ? ` data-tooltip="${escapeHtml(tooltip)}"` : ''}>${escapeHtml(label)}</span>`;
             }

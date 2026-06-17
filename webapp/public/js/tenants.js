@@ -5,6 +5,17 @@ let checkCategoryData = null;
 
 const DEFAULT_SUFFIX = 'console.ves.volterra.io';
 
+function expiryStatus(dateStr) {
+  if (!dateStr) return { label: '', cls: '' };
+  const expiry = new Date(dateStr + 'T23:59:59');
+  const now = new Date();
+  const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+  if (daysLeft < 0) return { label: `Expired ${Math.abs(daysLeft)}d ago`, cls: 'expiry-expired' };
+  if (daysLeft <= 14) return { label: `Expires in ${daysLeft}d`, cls: 'expiry-soon' };
+  if (daysLeft <= 30) return { label: `Expires in ${daysLeft}d`, cls: 'expiry-warning' };
+  return { label: `Expires ${dateStr}`, cls: 'expiry-ok' };
+}
+
 async function loadTenants() {
   tenants = await api('/tenants');
 }
@@ -133,6 +144,11 @@ async function renderParentForm(container, existing = null) {
             <div class="form-hint">Generate at Administration &rarr; Personal Management &rarr; Credentials &rarr; API Token</div>
           </div>
         </div>
+        <div class="form-group">
+          <label for="tf-expiry">Credential Expiry</label>
+          <input type="date" id="tf-expiry" value="${existing?.credentialExpiry || ''}">
+          <div class="form-hint">When this API credential expires. Leave blank if no expiry.</div>
+        </div>
 
         <div class="form-group">
           <label for="tf-plan">Plan Tier</label>
@@ -219,6 +235,7 @@ async function renderParentForm(container, existing = null) {
     return {
       tenant: document.getElementById('tf-tenant').value.trim(),
       ...getCredential(),
+      credentialExpiry: document.getElementById('tf-expiry').value || null,
       consoleSuffix: document.getElementById('tf-suffix').value.trim() || DEFAULT_SUFFIX,
       plan: document.getElementById('tf-plan').value,
       addons: getSelectedAddons('#tf-addons'),
@@ -238,6 +255,7 @@ async function renderParentForm(container, existing = null) {
     // Clear the other auth type
     if (cred.p12Path) u.apiToken = null;
     if (cred.apiToken) { u.p12Path = null; u.p12Password = ''; }
+    u.credentialExpiry = document.getElementById('tf-expiry').value || null;
     u.consoleSuffix = document.getElementById('tf-suffix').value.trim() || DEFAULT_SUFFIX;
     u.plan = document.getElementById('tf-plan').value;
     u.addons = getSelectedAddons('#tf-addons');
@@ -365,6 +383,7 @@ export async function renderTenants(container) {
             <div class="card-subtitle">${escapeHtml(t.tenant)}.${escapeHtml(suffix)}</div>
           </div>
           <div class="card-actions">
+            <button class="btn-sm btn-secondary discover-btn" data-id="${t.id}">Discover</button>
             <button class="btn-sm btn-secondary add-managed-btn" data-id="${t.id}">+ Managed</button>
             <button class="btn-sm btn-secondary edit-btn" data-id="${t.id}">Edit</button>
             <button class="btn-sm btn-danger delete-btn" data-id="${t.id}">Delete</button>
@@ -374,6 +393,7 @@ export async function renderTenants(container) {
           <span class="tag tag-plan">${escapeHtml(t.plan || 'essentials')}</span>
           ${(t.addons?.length) ? `<span class="tag tag-plan">${t.addons.length} add-on${t.addons.length > 1 ? 's' : ''}</span>` : ''}
           ${t.p12Path ? `<span style="color:#2b8a3e;font-size:11px">p12: ${escapeHtml(t.p12Path.split('/').pop())}</span>` : t.hasCredential ? '<span style="color:#2b8a3e;font-size:11px">API token configured</span>' : '<span style="color:#c92a2a;font-size:11px">No credentials</span>'}
+          ${(() => { const s = expiryStatus(t.credentialExpiry); return s.label ? `<span class="tag ${s.cls}">${escapeHtml(s.label)}</span>` : ''; })()}
         </div>
     `;
 
@@ -430,6 +450,43 @@ export async function renderTenants(container) {
     btn.onclick = () => {
       const t = tenants.find(t => t.id === btn.dataset.id);
       if (t) renderManagedForm(container, t);
+    };
+  });
+
+  container.querySelectorAll('.discover-btn').forEach(btn => {
+    btn.onclick = async () => {
+      const t = tenants.find(t => t.id === btn.dataset.id);
+      if (!t) return;
+      btn.disabled = true;
+      btn.textContent = 'Discovering...';
+      try {
+        const discovered = await api(`/tenants/${t.id}/discover-managed`);
+        const existing = new Set((t.managedTenants || []).map(m => m.tenant));
+        const newTenants = discovered.filter(d => !existing.has(d.name));
+        if (newTenants.length === 0) {
+          alert(`All ${discovered.length} managed tenant(s) are already configured.`);
+          btn.disabled = false;
+          btn.textContent = 'Discover';
+          return;
+        }
+        const names = newTenants.map(d => d.name).join(', ');
+        if (!confirm(`Found ${newTenants.length} new managed tenant(s):\n${names}\n\nAdd them?`)) {
+          btn.disabled = false;
+          btn.textContent = 'Discover';
+          return;
+        }
+        for (const d of newTenants) {
+          await api(`/tenants/${t.id}/managed`, {
+            method: 'POST',
+            body: { name: d.name, tenant: d.name, plan: t.plan },
+          });
+        }
+        renderTenants(container);
+      } catch (err) {
+        alert(`Discovery failed: ${err.message}`);
+        btn.disabled = false;
+        btn.textContent = 'Discover';
+      }
     };
   });
 

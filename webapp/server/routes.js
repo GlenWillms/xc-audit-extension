@@ -30,14 +30,14 @@ router.get('/tenants', wrap(async (req, res) => {
 }));
 
 router.post('/tenants', wrap(async (req, res) => {
-  const { name, tenant, p12Path, p12Password, apiToken, consoleSuffix, plan, addons } = req.body;
+  const { name, tenant, p12Path, p12Password, apiToken, credentialExpiry, consoleSuffix, plan, addons } = req.body;
   if (!tenant) {
     return res.status(400).json({ error: 'tenant is required' });
   }
   if (!p12Path && !apiToken) {
     return res.status(400).json({ error: 'Either p12Path or apiToken is required' });
   }
-  const result = await addTenant({ name, tenant, p12Path, p12Password, apiToken, consoleSuffix, plan, addons });
+  const result = await addTenant({ name, tenant, p12Path, p12Password, apiToken, credentialExpiry, consoleSuffix, plan, addons });
   res.status(201).json(result);
 }));
 
@@ -75,6 +75,20 @@ router.delete('/tenants/:id/managed/:mid', wrap(async (req, res) => {
   const ok = await deleteManagedTenant(req.params.id, req.params.mid);
   if (!ok) return res.status(404).json({ error: 'Managed tenant not found' });
   res.json({ ok: true });
+}));
+
+// --- Managed tenant discovery ---
+
+router.get('/tenants/:id/discover-managed', wrap(async (req, res) => {
+  const config = await resolveTenantConfig(req.params.id, null);
+  if (!config) return res.status(404).json({ error: 'Tenant not found' });
+  try {
+    const client = makeClient(config);
+    const discovered = await client.listManagedTenants();
+    res.json(discovered);
+  } catch (err) {
+    res.status(502).json({ error: `XC API error: ${err.message}` });
+  }
 }));
 
 // --- Namespace discovery (works for both parent and managed) ---
