@@ -5,7 +5,7 @@ node_modules/
 xc-config-objects/
 webapp/data/
 webapp/node_modules/
-webapp/.env
+.env
 
 # Terraform
 *.tfstate

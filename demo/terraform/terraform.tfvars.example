@@ -9,9 +9,10 @@ tenant_name = "your-tenant-abcdefgh"
 # shared_namespace = "shared"
 
 # -----------------------------------------------------------------------
-# The following are expected as environment variables (not in this file):
+# The following are expected as environment variables (not in this file).
+# Source your .env file before running terraform:  source .env
 #
-#   export TF_VAR_base_domain="example.com"
+#   export TF_VAR_base_domain="demo.example.com"
 #   export TF_VAR_namecheap_domain="example.com"
 #
 #   export NAMECHEAP_USER_NAME="your-username"
