@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>XC Audit — Scenario Configuration Guide</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 1000px; margin: 0 auto; padding: 24px; color: #333; background: #fff; }
+  h1 { border-bottom: 3px solid #6200ea; padding-bottom: 8px; }
+  h2 { color: #6200ea; margin-top: 48px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+  h3 { color: #555; margin-top: 24px; }
+  h4 { color: #444; margin-top: 20px; }
+  p, li { font-size: 14px; color: #444; line-height: 1.7; }
+  .diagram { margin: 16px 0 24px; }
+  .toc { background: #f5f5f5; padding: 16px 24px; border-radius: 8px; margin-bottom: 32px; }
+  .toc a { text-decoration: none; color: #6200ea; }
+  .toc a:hover { text-decoration: underline; }
+  .toc ul { margin: 4px 0; }
+  .toc li { margin: 4px 0; }
+  code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+  pre.mockup { background: #1e1e1e; color: #d4d4d4; padding: 16px 20px; border-radius: 8px; font-size: 13px; line-height: 1.5; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+  th { background: #f5f5f5; font-weight: 600; }
+  .note { background: #e3f2fd; border-left: 4px solid #2196F3; padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; font-size: 13px; }
+  hr { border: none; border-top: 2px solid #eee; margin: 40px 0; }
+  @media print { .toc { display: none; } }
+</style>
+</head>
+<body>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { useMaxWidth: true }, sequence: { useMaxWidth: true } });</script>
+
+<h1>Audit Scenarios — Configuration Guide</h1>
+<p>How to configure your load balancers for three common audit scenarios.</p>
+
+<div class="toc">
+<strong>Contents</strong>
+<ul>
+<li><a href="#s1">Scenario 1: Standard Audit</a> — No configuration required</li>
+<li><a href="#s2">Scenario 2: Baseline LB Override</a> — Compare against a reference LB</li>
+<li><a href="#s3">Scenario 3: Selective Ignore Labels</a> — Skip checks with exemption labels</li>
+</ul>
+</div>
+
+<hr>
+
+<!-- ==================== SCENARIO 1 ==================== -->
+
+<h2 id="s1">Scenario 1: Standard Audit</h2>
+<p>Every LB is compared against the full security baseline. Service policies are compared against the default namespace. <strong>No configuration required.</strong></p>
+
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    subgraph XC["XC Console"]
+        LB["HTTP Load Balancer\n(any namespace)"]
+        Baseline["Security Baseline\n(extension settings)"]
+        DefaultNS["Default Namespace\nService Policies"]
+    end
+
+    subgraph Audit["Audit Result"]
+        Compare["Compare every setting\nagainst baseline"]
+        Result["Per-LB Report Card"]
+    end
+
+    LB --> Compare
+    Baseline --> Compare
+    DefaultNS -->|"policy comparison"| Compare
+    Compare --> Result
+
+    style XC fill:#e8f4f8,stroke:#2196F3
+    style Audit fill:#e8f5e9,stroke:#4CAF50
+</pre>
+</div>
+
+<h3>What You See in the Report</h3>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TD
+    subgraph Report["Report Output"]
+        direction TB
+        LB1["✅ app-compliant — 12 passed, 0 warnings"]
+        LB2["⚠️ app-basic — 8 passed, 4 warnings"]
+
+        subgraph Warnings["Expanded Warnings"]
+            W1["⚠️ TLS — missing"]
+            W2["⚠️ HSTS — missing"]
+            W3["⚠️ WAF Blocking Mode — expected: Block, found: Monitor"]
+            W4["⚠️ Bot Defense — missing"]
+        end
+
+        subgraph Passed["Expanded Passed"]
+            P1["✅ App Firewall"]
+            P2["✅ Geo Policy"]
+            P3["✅ IP Reputation"]
+        end
+    end
+
+    LB2 --> Warnings
+    LB1 --> Passed
+
+    style Report fill:#fff,stroke:#ddd
+    style Warnings fill:#fff3e0,stroke:#FF9800
+    style Passed fill:#e8f5e9,stroke:#4CAF50
+</pre>
+</div>
+
+<h3>Configuration Steps</h3>
+<p><strong>None required.</strong> Install the extension or configure the webapp, navigate to the LB list page, and the audit runs automatically.</p>
+
+<hr>
+
+<!-- ==================== SCENARIO 2 ==================== -->
+
+<h2 id="s2">Scenario 2: Baseline LB Override</h2>
+<p>A reference LB in the <strong>default</strong> namespace serves as a "known-good" configuration. Other LBs are compared against it — shared gaps are suppressed, and improvements are flagged.</p>
+
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    subgraph XC["XC Console — Default Namespace"]
+        RefLB["🏠 baseline-standard\n(reference LB)"]
+    end
+
+    subgraph Target["XC Console — Production Namespace"]
+        TargetLB["📋 app-production\nLabel: xc-audit-baseline-lb = baseline-standard"]
+    end
+
+    subgraph Audit["Audit Comparison"]
+        direction TB
+        BothFail["Both fail DDoS?\n→ Suppressed (via baseline)"]
+        OnlyTarget["Only target fails WAF?\n→ ⚠️ Warning"]
+        OnlyBaseline["Target passes but\nbaseline fails API Discovery?\n→ ℹ️ Not in baseline"]
+    end
+
+    RefLB -->|"audited against\nsame baseline"| Audit
+    TargetLB -->|"compared to\nreference LB"| Audit
+
+    style XC fill:#e8f4f8,stroke:#2196F3
+    style Target fill:#fff3e0,stroke:#FF9800
+    style Audit fill:#f3e8f9,stroke:#9C27B0
+</pre>
+</div>
+
+<h3>What You See in the Report</h3>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TD
+    subgraph Report["Report Output for app-production"]
+        direction TB
+        Header["⚠️ app-production (baseline: baseline-standard)\n6 passed, 1 warning, 2 via baseline, 1 not in baseline"]
+
+        subgraph Active["Active Warnings"]
+            W1["⚠️ WAF Blocking Mode — expected: Block, found: Monitor"]
+        end
+
+        subgraph Via["Suppressed — Via Baseline"]
+            V1["✅ DDoS Mitigation Rules — via baseline-standard"]
+            V2["✅ L7 DDoS Protection — via baseline-standard"]
+        end
+
+        subgraph NIB["Flagged Differences"]
+            N1["ℹ️ API Discovery — not in baseline"]
+        end
+    end
+
+    Header --> Active
+    Header --> Via
+    Header --> NIB
+
+    style Report fill:#fff,stroke:#ddd
+    style Active fill:#fff3e0,stroke:#FF9800
+    style Via fill:#e8f5e9,stroke:#4CAF50
+    style NIB fill:#e3f2fd,stroke:#2196F3
+</pre>
+</div>
+
+<h3>Configuration Steps</h3>
+
+<h4>Step 1 — Create the Reference LB</h4>
+<p>Create an HTTP Load Balancer in the <strong>default</strong> namespace that represents your approved configuration (e.g., <code>baseline-standard</code>). This LB doesn't need to serve traffic — it's just a configuration template.</p>
+
+<h4>Step 2 — Add the Label to Target LBs</h4>
+<p>In the XC Console, navigate to your target LB:</p>
+<ol>
+<li><strong>Load Balancers</strong> → select the LB → <strong>Edit</strong></li>
+<li>Scroll to <strong>Labels</strong></li>
+<li>Add a label: Key = <code>xc-audit-baseline-lb</code>, Value = the name of your reference LB</li>
+<li><strong>Save and Exit</strong></li>
+</ol>
+
+<pre class="mockup">┌─────────────────────────────────────────────────┐
+│  Edit HTTP Load Balancer: app-production        │
+│                                                 │
+│  Labels                                         │
+│  ┌───────────────────────┬────────────────────┐ │
+│  │ Key                   │ Value              │ │
+│  ├───────────────────────┼────────────────────┤ │
+│  │ xc-audit-baseline-lb  │ baseline-standard  │ │
+│  └───────────────────────┴────────────────────┘ │
+│  + Add Label                                    │
+│                                                 │
+│            [Save and Exit]  [Cancel]            │
+└─────────────────────────────────────────────────┘</pre>
+
+<h4>How It Works</h4>
+<table>
+<thead><tr><th style="text-align:center">Current LB</th><th style="text-align:center">Baseline LB</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td style="text-align:center">⚠️ Fails</td><td style="text-align:center">⚠️ Fails</td><td><strong>Suppressed</strong> — shown as "via baseline-standard"</td></tr>
+<tr><td style="text-align:center">⚠️ Fails</td><td style="text-align:center">✅ Passes</td><td><strong>Warning</strong> — LB is worse than baseline</td></tr>
+<tr><td style="text-align:center">✅ Passes</td><td style="text-align:center">⚠️ Fails</td><td><strong>Flagged</strong> — shown as "not in baseline"</td></tr>
+<tr><td style="text-align:center">✅ Passes</td><td style="text-align:center">✅ Passes</td><td><strong>Passed</strong> — both comply</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ==================== SCENARIO 3 ==================== -->
+
+<h2 id="s3">Scenario 3: Selective Ignore Labels</h2>
+<p>Skip specific checks for individual LBs using exemption labels. Useful for LBs that intentionally don't need certain features (e.g., a static site that doesn't need Bot Defense).</p>
+
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    subgraph XC["XC Console"]
+        LB["📋 marketing-site\nLabels:\n  xc-audit-ignore-bot = true\n  xc-audit-ignore-apid = true"]
+    end
+
+    subgraph Audit["Audit Processing"]
+        direction TB
+        Full["Full Baseline\n15 checks"]
+        Filter["Remove exempt checks:\n- Bot Defense\n- API Discovery"]
+        Reduced["Filtered Baseline\n13 checks"]
+    end
+
+    subgraph Result["Report Output"]
+        Active["Active Checks\n8 passed, 2 warnings"]
+        Skipped["Skipped Checks\n~~Bot Defense — Ignored~~\n~~API Discovery — Ignored~~"]
+    end
+
+    LB --> Full
+    Full --> Filter
+    Filter --> Reduced
+    Reduced --> Active
+    Filter --> Skipped
+
+    style XC fill:#e8f4f8,stroke:#2196F3
+    style Audit fill:#fff3e0,stroke:#FF9800
+    style Result fill:#e8f5e9,stroke:#4CAF50
+</pre>
+</div>
+
+<h3>What You See in the Report</h3>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TD
+    subgraph Report["Report Output for marketing-site"]
+        direction TB
+        Header["⚠️ marketing-site\n8 passed, 2 warnings, 2 skipped"]
+
+        subgraph Warnings["Active Warnings"]
+            W1["⚠️ TLS — missing"]
+            W2["⚠️ HSTS — missing"]
+        end
+
+        subgraph Pass["Passed"]
+            P1["✅ App Firewall"]
+            P2["✅ WAF Blocking Mode"]
+            P3["✅ Geo Policy"]
+        end
+
+        subgraph Skip["Skipped — Ignored by Label"]
+            S1["~~Bot Defense — Ignored~~"]
+            S2["~~API Discovery — Ignored~~"]
+        end
+    end
+
+    Header --> Warnings
+    Header --> Pass
+    Header --> Skip
+
+    style Report fill:#fff,stroke:#ddd
+    style Warnings fill:#fff3e0,stroke:#FF9800
+    style Pass fill:#e8f5e9,stroke:#4CAF50
+    style Skip fill:#f5f5f5,stroke:#999
+</pre>
+</div>
+
+<h3>Configuration Steps</h3>
+
+<h4>Step 1 — Choose Which Checks to Skip</h4>
+<table>
+<thead><tr><th>Label Key</th><th>Skips</th><th>Category</th></tr></thead>
+<tbody>
+<tr><td><code>xc-audit-ignore-tls</code></td><td>TLS configuration</td><td>Core Security</td></tr>
+<tr><td><code>xc-audit-ignore-hsts</code></td><td>HSTS headers</td><td>Core Security</td></tr>
+<tr><td><code>xc-audit-ignore-iprep</code></td><td>IP Reputation checks</td><td>Core Security</td></tr>
+<tr><td><code>xc-audit-ignore-geo</code></td><td>Geo Policy checks</td><td>Core Security</td></tr>
+<tr><td><code>xc-audit-ignore-trustip</code></td><td>Trust Client IP Headers</td><td>Core Security</td></tr>
+<tr><td><code>xc-audit-ignore-waf</code></td><td>App Firewall + all WAF inspections</td><td>WAF</td></tr>
+<tr><td><code>xc-audit-ignore-mp</code></td><td>Malware Protection</td><td>WAF</td></tr>
+<tr><td><code>xc-audit-ignore-ddos</code></td><td>DDoS Mitigation + L7 DDoS</td><td>DDoS</td></tr>
+<tr><td><code>xc-audit-ignore-bot</code></td><td>Bot Defense</td><td>Bot Defense</td></tr>
+<tr><td><code>xc-audit-ignore-csd</code></td><td>Client-Side Defense</td><td>Bot Defense</td></tr>
+<tr><td><code>xc-audit-ignore-apid</code></td><td>API Discovery</td><td>API Security</td></tr>
+<tr><td><code>xc-audit-ignore-apip</code></td><td>API Protection + API Testing</td><td>API Security</td></tr>
+<tr><td><code>xc-audit-ignore-jwt</code></td><td>JWT Validation</td><td>API Security</td></tr>
+<tr><td><code>xc-audit-ignore-sp</code></td><td>Service Policies</td><td>Policy &amp; Data</td></tr>
+<tr><td><code>xc-audit-ignore-sdp</code></td><td>Sensitive Data Policy</td><td>Policy &amp; Data</td></tr>
+</tbody>
+</table>
+
+<h4>Step 2 — Add Labels to the LB</h4>
+<p>In the XC Console, navigate to your target LB:</p>
+<ol>
+<li><strong>Load Balancers</strong> → select the LB → <strong>Edit</strong></li>
+<li>Scroll to <strong>Labels</strong></li>
+<li>Add one label per check you want to skip: Key from table above, Value = <code>true</code></li>
+<li><strong>Save and Exit</strong></li>
+</ol>
+
+<pre class="mockup">┌─────────────────────────────────────────────────┐
+│  Edit HTTP Load Balancer: marketing-site        │
+│                                                 │
+│  Labels                                         │
+│  ┌───────────────────────┬────────────────────┐ │
+│  │ Key                   │ Value              │ │
+│  ├───────────────────────┼────────────────────┤ │
+│  │ xc-audit-ignore-bot   │ true               │ │
+│  ├───────────────────────┼────────────────────┤ │
+│  │ xc-audit-ignore-apid  │ true               │ │
+│  └───────────────────────┴────────────────────┘ │
+│  + Add Label                                    │
+│                                                 │
+│            [Save and Exit]  [Cancel]            │
+└─────────────────────────────────────────────────┘</pre>
+
+<div class="note">
+<strong>Tip:</strong> Custom exemption codes can be defined in the extension's Options page under <strong>Exemption Map</strong>.
+</div>
+
+</body>
+</html>
