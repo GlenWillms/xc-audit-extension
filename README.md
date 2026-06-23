@@ -52,7 +52,7 @@ No build tools, Node.js, or other dependencies are required. The extension runs 
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/GlenWillms/xc-audit-extension.git
+   git clone https://github.com/GlenWillms/xc-audit-tools.git
    ```
 2. Open `chrome://extensions` (or `edge://extensions`)
 3. Enable **Developer mode** (toggle in the top-right corner)
