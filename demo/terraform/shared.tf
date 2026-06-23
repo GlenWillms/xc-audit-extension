@@ -269,6 +269,10 @@ resource "volterra_active_service_policies" "default" {
     name      = volterra_service_policy.ip_threat_intel.name
     namespace = var.shared_namespace
   }
+  policies {
+    name      = "ves-io-allow-all"
+    namespace = "ves-io-shared"
+  }
 }
 
 resource "volterra_active_service_policies" "baseline" {
@@ -281,6 +285,10 @@ resource "volterra_active_service_policies" "baseline" {
   policies {
     name      = volterra_service_policy.ip_threat_intel.name
     namespace = var.shared_namespace
+  }
+  policies {
+    name      = "ves-io-allow-all"
+    namespace = "ves-io-shared"
   }
 }
 
@@ -295,6 +303,10 @@ resource "volterra_active_service_policies" "plan" {
     name      = volterra_service_policy.ip_threat_intel.name
     namespace = var.shared_namespace
   }
+  policies {
+    name      = "ves-io-allow-all"
+    namespace = "ves-io-shared"
+  }
 }
 
 resource "volterra_active_service_policies" "labels" {
@@ -308,6 +320,10 @@ resource "volterra_active_service_policies" "labels" {
     name      = volterra_service_policy.ip_threat_intel.name
     namespace = var.shared_namespace
   }
+  policies {
+    name      = "ves-io-allow-all"
+    namespace = "ves-io-shared"
+  }
 }
 
 resource "volterra_active_service_policies" "workloads" {
@@ -320,5 +336,9 @@ resource "volterra_active_service_policies" "workloads" {
   policies {
     name      = volterra_service_policy.ip_threat_intel.name
     namespace = var.shared_namespace
+  }
+  policies {
+    name      = "ves-io-allow-all"
+    namespace = "ves-io-shared"
   }
 }
