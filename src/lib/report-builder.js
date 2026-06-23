@@ -393,9 +393,7 @@ function buildLbHtml(result, checkCategories) {
       const inspCheck = cat.checks?.find((c) => c.inspector === insp.inspector);
       const inspLabel = inspCheck?.label || insp.refName;
       const active = isActiveForPlan(insp.plan || inspCheck?.plan || 'essentials', plan, addons, inspCheck?.key);
-      if (!active && insp.pass) {
-        html += `<span class="tag tag-unlicensed">${escapeHtml(inspLabel)} &mdash; Unlicensed</span>`;
-      } else if (!active) {
+      if (!active) {
         const tag = planTagLabel(insp.plan || inspCheck?.plan);
         html += `<span class="tag tag-unavail">${escapeHtml(inspLabel)} &mdash; ${tag}</span>`;
       } else if (insp.pass) {
@@ -423,7 +421,8 @@ function buildLbHtml(result, checkCategories) {
       const label = check?.label || o.path || o.inspector;
       const active = isActiveForPlan(o.plan || check?.plan || 'essentials', plan, addons, check?.key);
       if (!active) {
-        html += `<span class="tag tag-unlicensed">${escapeHtml(label)} &mdash; Unlicensed</span>`;
+        const tag = planTagLabel(o.plan || check?.plan);
+        html += `<span class="tag tag-unavail">${escapeHtml(label)} &mdash; ${tag}</span>`;
       } else if (o.overrideStatus === 'not_in_baseline') {
         html += `<span class="tag tag-info">${escapeHtml(label)} &mdash; not in baseline</span>`;
       } else {
@@ -442,7 +441,8 @@ function buildLbHtml(result, checkCategories) {
       const label = check?.label || p.key;
       const active = isActiveForPlan(p.plan || check?.plan || 'essentials', plan, addons, check?.key);
       if (!active) {
-        html += `<span class="tag tag-unlicensed">${escapeHtml(label)} &mdash; Unlicensed</span>`;
+        const tag = planTagLabel(p.plan || check?.plan);
+        html += `<span class="tag tag-unavail">${escapeHtml(label)} &mdash; ${tag}</span>`;
       } else {
         html += `<span class="tag tag-pass">${escapeHtml(label)}${owaspBadges(check)}</span>`;
       }
@@ -655,7 +655,7 @@ td.skip { color: var(--skip-fg); }
 .tag-skip { background: var(--skip-bg); color: var(--skip-fg); text-decoration: line-through; }
 .tag-info { background: var(--rec-bg); color: var(--rec-fg); }
 .tag-unavail { background: #f8f9fa; color: var(--unavail-fg); font-style: italic; }
-.tag-unlicensed { background: #e8ddf5; color: #6f42c1; font-weight: 600; }
+
 
 .rec-badge { font-size: 10px; font-weight: 600; color: var(--rec-fg); background: var(--rec-bg); padding: 1px 5px; border-radius: 3px; }
 .ref-tag { font-size: 10px; color: var(--rec-fg); background: var(--rec-bg); padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
